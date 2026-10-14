@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CameraSpeechMatch.Sample/CameraSpeechMatch.Sample.csproj" />
+    <Project Path="src/CameraSpeechMatch/CameraSpeechMatch.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CameraSpeechMatch.Tests/CameraSpeechMatch.Tests.csproj" />
+  </Folder>
+</Solution>

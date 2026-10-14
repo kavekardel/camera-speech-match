@@ -1,0 +1,308 @@
+<section class="camera-speech-match-shell" dir="ltr" aria-label="Video verification">
+    <MudPaper Class="camera-speech-match" Elevation="0" Outlined="true">
+        <header class="camera-speech-match__header">
+            <div class="camera-speech-match__heading">
+                <span class="camera-speech-match__heading-icon" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Outlined.FactCheck" />
+                </span>
+                <div>
+                    <MudText Typo="Typo.h5" Class="camera-speech-match__title">
+                        Video verification
+                    </MudText>
+                    <MudText Typo="Typo.body2" Class="camera-speech-match__subtitle">
+                        Record a new video while you read the verification text.
+                    </MudText>
+                </div>
+            </div>
+
+            <MudChip T="string" Color="@BadgeStatus.Variant" Variant="Variant.Outlined" Icon="@BadgeStatus.Icon" Class="camera-speech-match__status">
+                @BadgeStatus.Label
+            </MudChip>
+        </header>
+
+        <MudDivider Class="camera-speech-match__divider" />
+
+        <div class="camera-speech-match__actions" role="group" aria-label="Recording controls">
+            <div class="camera-speech-match__action-guidance">
+                <MudIcon Icon="@ActionIcon" Size="Size.Small" />
+                <MudText Typo="Typo.body2">@ActionHint</MudText>
+            </div>
+
+            <div class="camera-speech-match__action-button">
+                @if (State == CameraSpeechMatchState.NotStarted)
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Error"
+                               Size="Size.Large"
+                               StartIcon="@Icons.Material.Filled.FiberManualRecord"
+                               Disabled="@(module is null || starting)"
+                               OnClick="StartVerificationAsync">
+                        @(starting ? "Starting…" : "Start recording")
+                    </MudButton>
+                }
+                else if (State == CameraSpeechMatchState.Ready)
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Error"
+                               Size="Size.Large"
+                               StartIcon="@Icons.Material.Filled.FiberManualRecord"
+                               Disabled="@(!IsFaceVisible || starting || recordingStartPending)"
+                               OnClick="StartRecordingAsync">
+                        @(IsFaceVisible ? "Start recording" : "Waiting for your face in the frame...")
+                    </MudButton>
+                }
+                else if (State == CameraSpeechMatchState.Recording)
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Error"
+                               Size="Size.Large"
+                               StartIcon="@Icons.Material.Filled.Stop"
+                               Disabled="@recordingStartPending"
+                               OnClick="StopRecordingAsync">
+                        Stop recording
+                    </MudButton>
+                }
+                else if (State == CameraSpeechMatchState.Processing)
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Info"
+                               Size="Size.Large"
+                               Disabled="true"
+                               StartIcon="@Icons.Material.Outlined.HourglassTop">
+                        Processing…
+                    </MudButton>
+                }
+                else if (State is CameraSpeechMatchState.Completed or CameraSpeechMatchState.Error)
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Default"
+                               Size="Size.Large"
+                               StartIcon="@Icons.Material.Outlined.Refresh"
+                               OnClick="RetryAsync">
+                        Record again
+                    </MudButton>
+                }
+            </div>
+        </div>
+
+        <div class="camera-speech-match__content">
+            <aside class="camera-speech-match__instructions">
+                <div class="camera-speech-match__section-heading">
+                    <span class="camera-speech-match__section-icon" aria-hidden="true">
+                        <MudIcon Icon="@Icons.Material.Outlined.RecordVoiceOver" Size="Size.Small" />
+                    </span>
+                    <div>
+                        <MudText Typo="Typo.subtitle2">Read this text</MudText>
+                        <MudText Typo="Typo.caption">Speak clearly and read the text exactly as it is written.</MudText>
+                    </div>
+                </div>
+
+                <blockquote class="camera-speech-match__expected" dir="auto">
+                    @ExpectedText
+                </blockquote>
+
+                <div class="camera-speech-match__metadata" aria-label="Recording details">
+                    <span>
+                        <MudIcon Icon="@Icons.Material.Outlined.Translate" Size="Size.Small" />
+                        @DisplayLanguage
+                    </span>
+                    <span>
+                        <MudIcon Icon="@Icons.Material.Outlined.Timer" Size="Size.Small" />
+                        Maximum @FormattedMaximumTime
+                    </span>
+                </div>
+
+                <div class="camera-speech-match__tip">
+                    <MudIcon Icon="@Icons.Material.Outlined.Lightbulb" Size="Size.Small" />
+                    <MudText Typo="Typo.caption">
+                        Your full face must stay visible until recording ends. Choose a quiet place with good light.
+                    </MudText>
+                </div>
+            </aside>
+
+            <div class="camera-speech-match__camera-column">
+                <div class="camera-speech-match__preview" data-state="@StateCssName">
+                    <video @ref="videoElement"
+                           class="camera-speech-match__video"
+                           src="@(HasRecordedVideo ? recordedVideoPreviewUrl : null)"
+                           autoplay="@(!HasRecordedVideo)"
+                           muted="@(!HasRecordedVideo)"
+                           controls="@HasRecordedVideo"
+                           playsinline
+                           preload="metadata"
+                           aria-label="@(HasRecordedVideo ? "Recorded verification video" : "Live camera preview")">
+                    </video>
+
+                    @if (State is CameraSpeechMatchState.NotStarted or CameraSpeechMatchState.Processing or
+                                   CameraSpeechMatchState.Error ||
+                         State == CameraSpeechMatchState.Completed && !HasRecordedVideo)
+                    {
+                        <div class="camera-speech-match__preview-overlay">
+                            @if (State == CameraSpeechMatchState.Processing)
+                            {
+                                <span class="camera-speech-match__overlay-icon is-processing">
+                                    <MudProgressCircular Indeterminate="true" Color="Color.Inherit" Size="Size.Medium" />
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="camera-speech-match__overlay-icon">
+                                    <MudIcon Icon="@StateIcon" Size="Size.Large" />
+                                </span>
+                            }
+
+                            <div class="camera-speech-match__overlay-copy">
+                                <strong>@PreviewTitle</strong>
+                                <span>@PreviewDescription</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (State is CameraSpeechMatchState.Ready or CameraSpeechMatchState.Recording)
+                    {
+                        <div class="camera-speech-match__camera-indicator">
+                            <MudIcon Icon="@Icons.Material.Outlined.Videocam" Size="Size.Small" />
+                            Camera is on
+                        </div>
+                    }
+                    else if (HasRecordedVideo)
+                    {
+                        <div class="camera-speech-match__camera-indicator">
+                            <MudIcon Icon="@Icons.Material.Outlined.Videocam" Size="Size.Small" />
+                            Recorded video
+                        </div>
+                    }
+
+                    @if (State is CameraSpeechMatchState.Ready or CameraSpeechMatchState.Recording)
+                    {
+                        <div class="camera-speech-match__face-guide" data-face-status="@FacePositionStatus">
+                            <span class="camera-speech-match__face-outline" aria-hidden="true"></span>
+                            <span class="camera-speech-match__face-guidance" role="status">@FacePositionGuidance</span>
+                        </div>
+                    }
+
+                    @if (State == CameraSpeechMatchState.Recording)
+                    {
+                        <div class="camera-speech-match__timer" aria-live="polite">
+                            <span class="camera-speech-match__recording-dot"></span>
+                            <span>Recording</span>
+                            <bdi>@FormattedElapsedTime / @FormattedMaximumTime</bdi>
+                        </div>
+
+                        <MudProgressLinear Class="camera-speech-match__recording-progress"
+                                           Color="Color.Error"
+                                           Value="@RecordingProgressPercent" />
+                    }
+                </div>
+
+                <div class="camera-speech-match__privacy-note">
+                    <MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Small" />
+                    <MudText Typo="Typo.caption">
+                        Camera and microphone access is used only for this verification step.
+                    </MudText>
+                </div>
+            </div>
+        </div>
+
+        @if (State is CameraSpeechMatchState.Recording or CameraSpeechMatchState.Processing || string.IsNullOrWhiteSpace(DisplayTranscript) is false)
+        {
+            <div class="camera-speech-match__transcript">
+                <div class="camera-speech-match__transcript-heading">
+                    <span>
+                        <MudIcon Icon="@Icons.Material.Outlined.GraphicEq" Size="Size.Small" />
+                        @(string.IsNullOrWhiteSpace(SpeechRelayUrl) ? "Transcript" : "Live transcript")
+                    </span>
+                    @if (State == CameraSpeechMatchState.Recording)
+                    {
+                        <small>@(string.IsNullOrWhiteSpace(SpeechRelayUrl) ? "Recording audio…" : "Listening…")</small>
+                    }
+                </div>
+
+                <p dir="auto" aria-live="polite">
+                    @if (string.IsNullOrWhiteSpace(FinalTranscript) is false)
+                    {
+                        <span>@FinalTranscript</span>
+                    }
+                    @if (string.IsNullOrWhiteSpace(InterimTranscript) is false)
+                    {
+                        <span class="camera-speech-match__transcript-interim">@InterimTranscript</span>
+                    }
+                    @if (string.IsNullOrWhiteSpace(DisplayTranscript))
+                    {
+                        <span class="camera-speech-match__transcript-placeholder">@(string.IsNullOrWhiteSpace(SpeechRelayUrl)
+                            ? "The transcript will appear after recording."
+                            : "Waiting for speech…")</span>
+                    }
+                </p>
+            </div>
+        }
+
+        @if (ShowResultDetails && LastResult is { Succeeded: true } result)
+        {
+            bool semanticMatch = result.MatchMode == CameraSpeechMatchMode.Semantic;
+            double? minimumRequiredPercent = semanticMatch ? result.MinimumSemanticSimilarityPercent : result.MinimumLexicalSimilarityPercent;
+            <MudAlert Severity="@(matchAccepted ? Severity.Success : Severity.Warning)"
+                      Variant="Variant.Outlined"
+                      Class="camera-speech-match__alert">
+                <div class="camera-speech-match__result">
+                    <div class="camera-speech-match__result-summary">
+                        <span class="camera-speech-match__result-icon">
+                            <MudIcon Icon="@(matchAccepted ? Icons.Material.Outlined.Verified : Icons.Material.Outlined.Info)" />
+                        </span>
+                        <div>
+                            <strong>@(semanticMatch
+                                ? (matchAccepted ? "The meaning matches" : "The meaning does not match")
+                                : (matchAccepted ? "The wording matches" : "The wording does not match"))</strong>
+                            <span>
+                                @(semanticMatch
+                                    ? "The result is based on the probability that the meaning and essential facts match the expected text."
+                                    : "The result is based on normalized wording similarity and the required minimum.")
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="camera-speech-match__result-metrics">
+                        @if (result.SemanticSimilarityPercent is { } semanticPercent)
+                        {
+                            <div class="camera-speech-match__result-metric">
+                                <div class="camera-speech-match__result-metric-heading">
+                                    <MudText Typo="Typo.body2">Semantic similarity</MudText>
+                                    <bdi class="camera-speech-match__score">@semanticPercent.ToString("0.##")%</bdi>
+                                </div>
+                                <MudProgressLinear Color="@(matchAccepted ? Color.Success : Color.Warning)"
+                                                   Value="@semanticPercent" />
+                            </div>
+                        }
+                        <div class="camera-speech-match__result-metric">
+                            <div class="camera-speech-match__result-metric-heading">
+                                <MudText Typo="Typo.body2">Lexical similarity</MudText>
+                                <bdi class="camera-speech-match__score">@result.LexicalSimilarityPercent.ToString("0.##")%</bdi>
+                            </div>
+                            <MudProgressLinear Color="@(matchAccepted ? Color.Success : Color.Warning)"
+                                               Value="@result.LexicalSimilarityPercent" />
+                        </div>
+                    </div>
+
+                    @if (minimumRequiredPercent is { } cutoff)
+                    {
+                        <MudText Typo="Typo.body2">Minimum required: @cutoff.ToString("0.##")%</MudText>
+                    }
+
+                    <div class="camera-speech-match__result-transcript">
+                        <small>Final transcript</small>
+                        <span dir="auto">@result.TranscribedText</span>
+                    </div>
+                </div>
+            </MudAlert>
+        }
+        else if (LastResult is { Succeeded: false } failedResult)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="camera-speech-match__alert">
+                <div class="camera-speech-match__error-result">
+                    <strong>Video verification did not finish</strong>
+                    <span>@failedResult.ErrorMessage</span>
+                </div>
+            </MudAlert>
+        }
+    </MudPaper>
+</section>

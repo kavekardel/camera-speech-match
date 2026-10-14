@@ -1,0 +1,108 @@
+﻿@page "/"
+
+<PageTitle>Camera speech match</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-8">
+    <MudText Typo="Typo.h4" Class="mb-2">Camera speech match</MudText>
+    <MudText Typo="Typo.body1" Class="mb-6">
+        Read the prompt on camera. A completed attempt returns the recording bytes on the result.
+        Speech transcription calls the registered speech service.
+    </MudText>
+
+    <MudPaper Class="pa-4 mb-6" Elevation="0" Outlined="true">
+        <MudGrid>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="ExpectedText" Label="Expected text" Lines="3" Required="true" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect @bind-Value="MatchMode" Label="Matching mode" T="CameraSpeechMatchMode">
+                    <MudSelectItem Value="CameraSpeechMatchMode.Lexical">Lexical</MudSelectItem>
+                    <MudSelectItem Value="CameraSpeechMatchMode.Semantic">Semantic</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            @if (MatchMode == CameraSpeechMatchMode.Lexical)
+            {
+                <MudItem xs="12" md="6">
+                    <MudNumericField @bind-Value="MinimumLexicalSimilarityPercent"
+                                     Label="Minimum lexical similarity (%)"
+                                     Min="0"
+                                     Max="100"
+                                     Step="1" />
+                </MudItem>
+            }
+            else if (MatchMode == CameraSpeechMatchMode.Semantic)
+            {
+                <MudItem xs="12" md="6">
+                    <MudNumericField @bind-Value="MinimumSemanticSimilarityPercent"
+                                     Label="Minimum semantic similarity (%)"
+                                     Min="0"
+                                     Max="100"
+                                     Step="1"
+                                     HelperText="Percentage from 0 to 100. Semantic mode needs a registered matcher." />
+                </MudItem>
+            }
+        </MudGrid>
+    </MudPaper>
+
+    <CameraSpeechMatch ExpectedText="@ExpectedText"
+                       MatchMode="@MatchMode"
+                       MinimumLexicalSimilarityPercent="@MinimumLexicalSimilarityPercent"
+                       MinimumSemanticSimilarityPercent="@MinimumSemanticSimilarityPercent"
+                       Language="en-US"
+                       CapturePcmAudio="true"
+                       MaxRecordingSeconds="30"
+                       OnResult="HandleVerificationResult"
+                       OnReset="ClearVerificationResult"
+                       ShowResultDetails="true" />
+
+    @if (VerificationResult is { } result)
+    {
+        <MudPaper Class="pa-4 mt-6" Elevation="0" Outlined="true">
+            <MudText Typo="Typo.h6" Class="mb-3">Latest result</MudText>
+            <MudStack Spacing="1">
+                <MudText>Succeeded: @result.Succeeded</MudText>
+                <MudText>Matching mode: @result.MatchMode</MudText>
+                <MudText>Lexical similarity: @result.LexicalSimilarityPercent.ToString("0.##")%</MudText>
+                @if (result.MinimumLexicalSimilarityPercent is { } minimumLexical)
+                {
+                    <MudText>Minimum lexical similarity: @minimumLexical.ToString("0.##")%</MudText>
+                }
+                @if (result.SemanticSimilarityPercent is { } semanticPercent)
+                {
+                    <MudText>Semantic similarity: @semanticPercent.ToString("0.##")%</MudText>
+                }
+                @if (result.MinimumSemanticSimilarityPercent is { } minimumSemantic)
+                {
+                    <MudText>Minimum semantic similarity: @minimumSemantic.ToString("0.##")%</MudText>
+                }
+                <MudText>Expected text: @result.ExpectedText</MudText>
+                <MudText>Transcript: @result.TranscribedText</MudText>
+                <MudText>Video filename: @(result.VideoFileName ?? "-")</MudText>
+                <MudText>Video bytes: @(result.VideoContent?.LongLength.ToString() ?? "-")</MudText>
+                <MudText>PCM audio filename: @(result.PcmAudioFileName ?? "-")</MudText>
+                <MudText>PCM audio content type: @(result.PcmAudioContentType ?? "-")</MudText>
+                <MudText>PCM audio bytes: @(result.PcmAudioContent?.LongLength.ToString() ?? "-")</MudText>
+                @if (result.ErrorMessage is not null)
+                {
+                    <MudText Color="Color.Error">Error: @result.ErrorMessage</MudText>
+                }
+            </MudStack>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    private string ExpectedText { get; set; } = "This is a sample text for testing.";
+    private CameraSpeechMatchMode MatchMode { get; set; } = CameraSpeechMatchMode.Lexical;
+    private double MinimumLexicalSimilarityPercent { get; set; } = 100;
+    private double MinimumSemanticSimilarityPercent { get; set; } = 80;
+    private CameraSpeechMatchResult? VerificationResult { get; set; }
+
+    private void ClearVerificationResult() => VerificationResult = null;
+
+    private Task HandleVerificationResult(CameraSpeechMatchResult result)
+    {
+        VerificationResult = result;
+        return Task.CompletedTask;
+    }
+}

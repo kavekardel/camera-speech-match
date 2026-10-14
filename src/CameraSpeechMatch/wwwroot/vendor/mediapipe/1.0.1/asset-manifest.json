@@ -1,0 +1,51 @@
+{
+  "package": "@mediapipe/tasks-vision",
+  "version": "1.0.1",
+  "license": "Apache-2.0",
+  "packageIntegrity": "sha512-rvRE2FmAZ6ZxKSw7wq+e+jQDpN3t1B/tD2mJz9SmAzb1msoDkd4dMoE4wAh8Z30Um0PQwLiHr9QtomhmXk3aUQ==",
+  "model": "face_landmarker/face_landmarker/float16/1",
+  "assets": [
+    {
+      "path": "vision_bundle.js",
+      "bytes": 155465,
+      "sha256": "98db72469ffb176f5e9f2687be0f70783893aca681f7789c34b872b0a764371a",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.0.1.tgz#package/vision_bundle.js"
+    },
+    {
+      "path": "wasm/vision_wasm_internal.js",
+      "bytes": 323377,
+      "sha256": "e170ee67dd4e16c1a6fcd8840a206687e5a59b22c20e4a902bc445b095454d73",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.0.1.tgz#package/wasm/vision_wasm_internal.js"
+    },
+    {
+      "path": "wasm/vision_wasm_internal.wasm",
+      "bytes": 11756954,
+      "sha256": "8da277a733926eacd0474b8704b36742d6ec3231c57a860c5b889dff8f1df886",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.0.1.tgz#package/wasm/vision_wasm_internal.wasm"
+    },
+    {
+      "path": "wasm/vision_wasm_nosimd_internal.js",
+      "bytes": 323180,
+      "sha256": "e81d715a3d42cc3373602eb2f7aff795d164934db680e32496b65dab537f9658",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.0.1.tgz#package/wasm/vision_wasm_nosimd_internal.js"
+    },
+    {
+      "path": "wasm/vision_wasm_nosimd_internal.wasm",
+      "bytes": 10960242,
+      "sha256": "a28483cd42e74e855bf5ebdb6b40d9b66a5b49e35e95020bc97669e6822a3192",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.0.1.tgz#package/wasm/vision_wasm_nosimd_internal.wasm"
+    },
+    {
+      "path": "face_landmarker.task",
+      "bytes": 3758596,
+      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+      "source": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task?generation=1683136941916318"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 12331,
+      "sha256": "8707eef0533987efc5b155d64761eeb6e20793f50b9bd1a68dad1cf4719d0ed8",
+      "source": "https://raw.githubusercontent.com/google-ai-edge/mediapipe/master/LICENSE"
+    }
+  ]
+}
