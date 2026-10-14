@@ -9,5 +9,5 @@ public interface ISystemOneService
     bool IsAvailable { get; }
 
     /// <summary>Returns a probability from 0 to 1 that the transcript matches the prompt.</summary>
-    Task<double> NoulTypeAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken);
+    Task<double> MatchProbabilityAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken);
 }

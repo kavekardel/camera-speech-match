@@ -48,7 +48,7 @@ camera-speech-match/
 | [CameraSpeechMatchResult.cs](../src/CameraSpeechMatch/CameraSpeechMatchResult.cs) | Processing status, `LexicalSimilarityPercent`, `MinimumLexicalSimilarityPercent`, `SemanticSimilarityPercent`, `MinimumSemanticSimilarityPercent`, text, media bytes/metadata, and errors. Only the selected mode's minimum is populated. Audio uses the video's base file name with `.pcm` and media type `application/octet-stream`. Successful results reuse the PCM bytes passed to STT. Match acceptance is private component state. |
 | [ISttService.cs](../src/CameraSpeechMatch/ISttService.cs) | Host transcription boundary: `IsAvailable` and `TranscribeAsync`. |
 | [SttTranscribeRequest.cs](../src/CameraSpeechMatch/SttTranscribeRequest.cs) | Normalized language and optional `PcmAudioContent`. PCM is fixed at mono 16 kHz signed 16-bit little-endian. Recorded video is supplied only on the result. |
-| [ISystemOneService.cs](../src/CameraSpeechMatch/ISystemOneService.cs) | Host semantic boundary: `IsAvailable` and `NoulTypeAsync`. |
+| [ISystemOneService.cs](../src/CameraSpeechMatch/ISystemOneService.cs) | Host semantic boundary: `IsAvailable` and `MatchProbabilityAsync`. |
 | [SystemOneMatchProbabilityRequest.cs](../src/CameraSpeechMatch/SystemOneMatchProbabilityRequest.cs) | Comparison texts and structured task/rules/acceptance criteria passed to the semantic provider. |
 | [SpeechTranscriptComparer.cs](../src/CameraSpeechMatch/SpeechTranscriptComparer.cs) | Public `SpeechTranscriptComparer.Compare` and `SpeechTranscriptComparison` record. Normalizes wording, checks equality, and calculates Levenshtein similarity. |
 

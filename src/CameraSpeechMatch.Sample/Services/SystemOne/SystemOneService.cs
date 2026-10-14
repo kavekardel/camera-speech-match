@@ -23,7 +23,7 @@ public sealed class SystemOneService(
 
     public bool IsAvailable => options.Value.Enabled && httpClient.BaseAddress is { Scheme: "http" or "https" };
 
-    public async Task<double> NoulTypeAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken)
+    public async Task<double> MatchProbabilityAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();

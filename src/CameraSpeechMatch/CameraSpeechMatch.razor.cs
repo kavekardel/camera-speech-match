@@ -763,7 +763,7 @@ public partial class CameraSpeechMatch(
             {
                 try
                 {
-                    double probability = await systemOneService.NoulTypeAsync(
+                    double probability = await systemOneService.MatchProbabilityAsync(
                         CreateSemanticMatchRequest(expectedText, recognizedTranscript), cancellationToken);
 
                     if (!IsCurrentCompletion(completionAttemptVersion))

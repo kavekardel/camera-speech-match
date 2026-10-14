@@ -145,7 +145,7 @@ public sealed class UnavailableSystemOneService : ISystemOneService
 {
     public bool IsAvailable => false;
 
-    public Task<double> NoulTypeAsync(
+    public Task<double> MatchProbabilityAsync(
         SystemOneMatchProbabilityRequest request,
         CancellationToken cancellationToken) =>
         Task.FromException<double>(
@@ -185,7 +185,7 @@ Return the recognized text and honor cancellation. The component trims the retur
 Implement [ISystemOneService](src/CameraSpeechMatch/ISystemOneService.cs) and register it with `IsAvailable == true`:
 
 ```csharp
-Task<double> NoulTypeAsync(
+Task<double> MatchProbabilityAsync(
     SystemOneMatchProbabilityRequest request,
     CancellationToken cancellationToken);
 ```

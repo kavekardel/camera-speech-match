@@ -33,7 +33,7 @@ public sealed class SystemOneServiceTests
             return Response(JsonSerializer.Serialize(new { probability, usage = new { inputTokens = 10, outputTokens = 5 } }));
         });
         using var client = Client(handler);
-        Assert.Equal(probability, await Service(client).NoulTypeAsync(Request(), default));
+        Assert.Equal(probability, await Service(client).MatchProbabilityAsync(Request(), default));
     }
 
     [Theory]
@@ -55,7 +55,7 @@ public sealed class SystemOneServiceTests
     {
         using var handler = new Handler((_, _) => Task.FromResult(Response(json)));
         using var client = Client(handler);
-        await Assert.ThrowsAsync<InvalidDataException>(() => Service(client).NoulTypeAsync(Request(), default));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Service(client).MatchProbabilityAsync(Request(), default));
     }
 
     [Theory]
@@ -67,7 +67,7 @@ public sealed class SystemOneServiceTests
     {
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage((HttpStatusCode)status)));
         using var client = Client(handler);
-        Exception? exception = await Record.ExceptionAsync(() => Service(client).NoulTypeAsync(Request(), default));
+        Exception? exception = await Record.ExceptionAsync(() => Service(client).MatchProbabilityAsync(Request(), default));
         Assert.IsType(exceptionType, exception);
         if (exception is HttpRequestException http) Assert.Equal((HttpStatusCode)status, http.StatusCode);
     }
@@ -85,9 +85,9 @@ public sealed class SystemOneServiceTests
             });
         });
         using var client = Client(handler);
-        await Assert.ThrowsAsync<ArgumentException>(() => Service(client, new() { MaxRequestBytes = 1 }).NoulTypeAsync(Request(), default));
+        await Assert.ThrowsAsync<ArgumentException>(() => Service(client, new() { MaxRequestBytes = 1 }).MatchProbabilityAsync(Request(), default));
         Assert.Equal(0, calls);
-        await Assert.ThrowsAsync<InvalidDataException>(() => Service(client, new() { MaxResponseBytes = 32 }).NoulTypeAsync(Request(), default));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Service(client, new() { MaxResponseBytes = 32 }).MatchProbabilityAsync(Request(), default));
         Assert.Equal(1, calls);
     }
 
@@ -99,7 +99,7 @@ public sealed class SystemOneServiceTests
             Content = new StreamContent(new NonSeekableStream([], delay: true))
         }));
         using var client = Client(handler);
-        await Assert.ThrowsAsync<TimeoutException>(() => Service(client, new() { TimeoutSeconds = 1 }).NoulTypeAsync(Request(), default));
+        await Assert.ThrowsAsync<TimeoutException>(() => Service(client, new() { TimeoutSeconds = 1 }).MatchProbabilityAsync(Request(), default));
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class SystemOneServiceTests
         using var handler = new Handler((_, _) => Task.FromResult(Response(
             "{\"probability\":0.5,\"usage\":{\"inputTokens\":1,\"outputTokens\":2}}")));
         using var client = Client(handler);
-        Assert.Equal(0.5, await Service(client, new() { MaxResponseBytes = int.MaxValue }).NoulTypeAsync(Request(), default));
+        Assert.Equal(0.5, await Service(client, new() { MaxResponseBytes = int.MaxValue }).MatchProbabilityAsync(Request(), default));
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public sealed class SystemOneServiceTests
         });
         using var client = Client(handler);
         using var cancellation = new CancellationTokenSource();
-        Task<double> pending = Service(client).NoulTypeAsync(Request(), cancellation.Token);
+        Task<double> pending = Service(client).MatchProbabilityAsync(Request(), cancellation.Token);
         cancellation.Cancel();
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
         Assert.Equal(cancellation.Token, exception.CancellationToken);
@@ -134,7 +134,7 @@ public sealed class SystemOneServiceTests
         using var client = Client(handler);
         var service = Service(client, new() { Enabled = false });
         Assert.False(service.IsAvailable);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.NoulTypeAsync(Request(), default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.MatchProbabilityAsync(Request(), default));
         client.BaseAddress = null;
         Assert.False(Service(client).IsAvailable);
     }

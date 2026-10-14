@@ -306,7 +306,7 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         public bool IsAvailable => true;
         public double Probability { get; set; } = 0.9;
         public int Calls { get; private set; }
-        public Task<double> NoulTypeAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken)
+        public Task<double> MatchProbabilityAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken)
         {
             Calls++;
             return Task.FromResult(Probability);
