@@ -26,12 +26,15 @@ public sealed class SttService(
         {
             throw new InvalidOperationException("Speech recognition is disabled or the service is not configured.");
         }
-        if (request.Language is not ("fa" or "en"))
+        string? language = speechOptions.Value.Language?.Trim()
+            .Split(['-', '_'], 2, StringSplitOptions.None)[0]
+            .ToLowerInvariant();
+        if (language is not ("fa" or "en"))
         {
-            throw new ArgumentException("Speech recognition supports only fa and en.", nameof(request));
+            throw new InvalidOperationException("Set SpeechInput:Language to fa or en for speech recognition.");
         }
 
-        byte[] audio = request.PcmAudioContent ?? throw new InvalidOperationException("Enable CapturePcmAudio to use the sample STT service.");
+        byte[] audio = request.PcmAudioContent ?? throw new InvalidOperationException("PCM audio is required by the sample STT service.");
 
         int maximumAudioBytes = Math.Clamp(speechOptions.Value.MaximumAudioBytes, 2, 10 * 1024 * 1024);
 
@@ -45,7 +48,7 @@ public sealed class SttService(
         deadline.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(speechOptions.Value.MaximumSessionSeconds, 1, 600)));
         try
         {
-            string transcript = await TranscribeCoreAsync(audio, request.Language, deadline.Token);
+            string transcript = await TranscribeCoreAsync(audio, language, deadline.Token);
             cancellationToken.ThrowIfCancellationRequested();
             logger.LogInformation("STT completed in {ElapsedMs} ms; audio bytes {AudioBytes}, transcript characters {Characters}",
                 stopwatch.ElapsedMilliseconds, audio.Length, transcript.Length);

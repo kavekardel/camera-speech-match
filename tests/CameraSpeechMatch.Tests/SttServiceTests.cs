@@ -19,9 +19,12 @@ namespace CameraSpeechMatch.Tests;
 public sealed class SttServiceTests
 {
     [Theory]
-    [InlineData("fa")]
-    [InlineData("en")]
-    public async Task Transcribe_SendsOnlyPcmAfterReadyAndWaitsForCompletion(string language)
+    [InlineData(null, "fa")]
+    [InlineData("fa", "fa")]
+    [InlineData("en", "en")]
+    [InlineData("fa-IR", "fa")]
+    [InlineData(" EN_us ", "en")]
+    public async Task Transcribe_SendsOnlyPcmAfterReadyAndWaitsForCompletion(string? configuredLanguage, string language)
     {
         byte[] audio = Enumerable.Range(0, 3_000).Select(i => (byte)i).ToArray();
         await using var server = await StartServerAsync(async (socket, token) =>
@@ -45,7 +48,8 @@ public sealed class SttServiceTests
             await SendAsync(socket, """{"type":"completed"}""", token);
         });
 
-        Assert.Equal("Hello world!", await server.Service().TranscribeAsync(Request(audio, language), default));
+        var settings = configuredLanguage is null ? null : new SpeechInputSettings { Language = configuredLanguage };
+        Assert.Equal("Hello world!", await server.Service(settings).TranscribeAsync(Request(audio), default));
     }
 
     [Theory]
@@ -80,14 +84,19 @@ public sealed class SttServiceTests
     [Fact]
     public async Task Transcribe_MissingPcmDoesNotConnect()
     {
-        var request = new SttTranscribeRequest { Language = "en" };
+        var request = new SttTranscribeRequest();
         await Assert.ThrowsAsync<InvalidOperationException>(() => Service().TranscribeAsync(request, default));
     }
 
-    [Fact]
-    public async Task Transcribe_UnsupportedLanguageDoesNotConnect()
+    [Theory]
+    [InlineData("fr")]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task Transcribe_UnsupportedConfiguredLanguageDoesNotConnect(string language)
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => Service().TranscribeAsync(Request(language: "fr"), default));
+        var service = Service(new SpeechInputSettings { Language = language });
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.TranscribeAsync(Request(), default));
+        Assert.Contains("SpeechInput:Language", error.Message);
     }
 
     [Fact]
@@ -261,9 +270,8 @@ public sealed class SttServiceTests
         new(Options.Create(stt ?? new() { BaseUrl = "http://127.0.0.1:1" }),
             Options.Create(speech ?? new()), NullLogger<SttService>.Instance);
 
-    private static SttTranscribeRequest Request(byte[]? audio = null, string language = "en") => new()
+    private static SttTranscribeRequest Request(byte[]? audio = null) => new()
     {
-        Language = language,
         PcmAudioContent = audio ?? [1, 2, 3, 4]
     };
 

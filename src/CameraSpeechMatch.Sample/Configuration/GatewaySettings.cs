@@ -10,6 +10,7 @@ public sealed class SttGatewaySettings
 public sealed class SpeechInputSettings
 {
     public bool Enabled { get; set; } = true;
+    public string Language { get; set; } = "fa";
     public int ReadyTimeoutSeconds { get; set; } = 15;
     public int FinalizationTimeoutSeconds { get; set; } = 6;
     public int MaximumSessionSeconds { get; set; } = 300;

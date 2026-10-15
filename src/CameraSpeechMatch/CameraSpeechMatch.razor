@@ -103,10 +103,6 @@
 
                 <div class="camera-speech-match__metadata" aria-label="Recording details">
                     <span>
-                        <MudIcon Icon="@Icons.Material.Outlined.Translate" Size="Size.Small" />
-                        @DisplayLanguage
-                    </span>
-                    <span>
                         <MudIcon Icon="@Icons.Material.Outlined.Timer" Size="Size.Small" />
                         Maximum @FormattedMaximumTime
                     </span>
@@ -210,11 +206,11 @@
                 <div class="camera-speech-match__transcript-heading">
                     <span>
                         <MudIcon Icon="@Icons.Material.Outlined.GraphicEq" Size="Size.Small" />
-                        @(string.IsNullOrWhiteSpace(SpeechRelayUrl) ? "Transcript" : "Live transcript")
+                        Transcript
                     </span>
                     @if (State == CameraSpeechMatchState.Recording)
                     {
-                        <small>@(string.IsNullOrWhiteSpace(SpeechRelayUrl) ? "Recording audio…" : "Listening…")</small>
+                        <small>Recording audio…</small>
                     }
                 </div>
 
@@ -229,9 +225,7 @@
                     }
                     @if (string.IsNullOrWhiteSpace(DisplayTranscript))
                     {
-                        <span class="camera-speech-match__transcript-placeholder">@(string.IsNullOrWhiteSpace(SpeechRelayUrl)
-                            ? "The transcript will appear after recording."
-                            : "Waiting for speech…")</span>
+                        <span class="camera-speech-match__transcript-placeholder">The transcript will appear after recording.</span>
                     }
                 </p>
             </div>
@@ -239,25 +233,30 @@
 
         @if (ShowResultDetails && LastResult is { Succeeded: true } result)
         {
-            bool semanticMatch = result.MatchMode == CameraSpeechMatchMode.Semantic;
-            double? minimumRequiredPercent = semanticMatch ? result.MinimumSemanticSimilarityPercent : result.MinimumLexicalSimilarityPercent;
-            <MudAlert Severity="@(matchAccepted ? Severity.Success : Severity.Warning)"
+            bool combinedMatch = result.MatchMode == CameraSpeechMatchMode.Combined;
+            string summary = result.MatchMode switch
+            {
+                CameraSpeechMatchMode.Semantic => result.IsAccepted ? "The meaning matches" : "The meaning does not match",
+                CameraSpeechMatchMode.Combined => result.IsAccepted ? "The wording and meaning match" : "The wording and meaning do not both match",
+                _ => result.IsAccepted ? "The wording matches" : "The wording does not match"
+            };
+            string explanation = result.MatchMode switch
+            {
+                CameraSpeechMatchMode.Semantic => "The result is based on the probability that the meaning and essential facts match the expected text.",
+                CameraSpeechMatchMode.Combined => "Both lexical and semantic similarity must meet their required minimums.",
+                _ => "The result is based on normalized wording similarity and the required minimum."
+            };
+            <MudAlert Severity="@(result.IsAccepted ? Severity.Success : Severity.Warning)"
                       Variant="Variant.Outlined"
                       Class="camera-speech-match__alert">
                 <div class="camera-speech-match__result">
                     <div class="camera-speech-match__result-summary">
                         <span class="camera-speech-match__result-icon">
-                            <MudIcon Icon="@(matchAccepted ? Icons.Material.Outlined.Verified : Icons.Material.Outlined.Info)" />
+                            <MudIcon Icon="@(result.IsAccepted ? Icons.Material.Outlined.Verified : Icons.Material.Outlined.Info)" />
                         </span>
                         <div>
-                            <strong>@(semanticMatch
-                                ? (matchAccepted ? "The meaning matches" : "The meaning does not match")
-                                : (matchAccepted ? "The wording matches" : "The wording does not match"))</strong>
-                            <span>
-                                @(semanticMatch
-                                    ? "The result is based on the probability that the meaning and essential facts match the expected text."
-                                    : "The result is based on normalized wording similarity and the required minimum.")
-                            </span>
+                            <strong>@summary</strong>
+                            <span>@explanation</span>
                         </div>
                     </div>
 
@@ -269,8 +268,23 @@
                                     <MudText Typo="Typo.body2">Semantic similarity</MudText>
                                     <bdi class="camera-speech-match__score">@semanticPercent.ToString("0.##")%</bdi>
                                 </div>
-                                <MudProgressLinear Color="@(matchAccepted ? Color.Success : Color.Warning)"
+                                <MudProgressLinear Color="@(semanticPercent >= result.MinimumSemanticSimilarityPercent ? Color.Success : Color.Warning)"
                                                    Value="@semanticPercent" />
+                                @if (result.MinimumSemanticSimilarityPercent is { } semanticMinimum)
+                                {
+                                    <MudText Typo="Typo.body2">Minimum required: @semanticMinimum.ToString("0.##")%</MudText>
+                                }
+                            </div>
+                        }
+                        else if (combinedMatch)
+                        {
+                            <div class="camera-speech-match__result-metric">
+                                <MudText Typo="Typo.body2">Semantic similarity</MudText>
+                                <MudText Typo="Typo.body2">Not evaluated because the lexical minimum was not met.</MudText>
+                                @if (result.MinimumSemanticSimilarityPercent is { } semanticMinimum)
+                                {
+                                    <MudText Typo="Typo.body2">Minimum required: @semanticMinimum.ToString("0.##")%</MudText>
+                                }
                             </div>
                         }
                         <div class="camera-speech-match__result-metric">
@@ -278,15 +292,16 @@
                                 <MudText Typo="Typo.body2">Lexical similarity</MudText>
                                 <bdi class="camera-speech-match__score">@result.LexicalSimilarityPercent.ToString("0.##")%</bdi>
                             </div>
-                            <MudProgressLinear Color="@(matchAccepted ? Color.Success : Color.Warning)"
+                            <MudProgressLinear Color="@(result.MinimumLexicalSimilarityPercent is { } lexicalMinimum
+                                                   ? (result.LexicalSimilarityPercent >= lexicalMinimum ? Color.Success : Color.Warning)
+                                                   : Color.Info)"
                                                Value="@result.LexicalSimilarityPercent" />
+                            @if (result.MinimumLexicalSimilarityPercent is { } lexicalCutoff)
+                            {
+                                <MudText Typo="Typo.body2">Minimum required: @lexicalCutoff.ToString("0.##")%</MudText>
+                            }
                         </div>
                     </div>
-
-                    @if (minimumRequiredPercent is { } cutoff)
-                    {
-                        <MudText Typo="Typo.body2">Minimum required: @cutoff.ToString("0.##")%</MudText>
-                    }
 
                     <div class="camera-speech-match__result-transcript">
                         <small>Final transcript</small>

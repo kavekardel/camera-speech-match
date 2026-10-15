@@ -25,28 +25,17 @@ public partial class CameraSpeechMatch(
     public string? FileNamePrefix { get; set; }
 
     /// <summary>
-    /// Optional WebSocket address for live captions while recording. A relative path uses this host.
-    /// The transcript used for matching comes from <see cref="ISttService.TranscribeAsync"/>.
-    /// </summary>
-    [Parameter]
-    public string? SpeechRelayUrl { get; set; }
-
-    /// <summary>Capture mono 16 kHz PCM16 audio alongside video for the host's transcription service.</summary>
-    [Parameter]
-    public bool CapturePcmAudio { get; set; }
-
-    /// <summary>
     /// How the transcript is compared with <see cref="ExpectedText"/>.
-    /// Semantic mode requires a configured <see cref="ISystemOneService"/>; otherwise the attempt fails.
+    /// Semantic and Combined modes require a configured <see cref="ISystemOneService"/>; otherwise the attempt fails.
     /// </summary>
     [Parameter]
     public CameraSpeechMatchMode MatchMode { get; set; } = CameraSpeechMatchMode.Lexical;
 
-    /// <summary>Minimum normalized wording similarity in Lexical mode, from 0 to 100.</summary>
+    /// <summary>Inclusive minimum normalized wording similarity in Lexical and Combined modes, from 0 to 100.</summary>
     [Parameter]
     public double MinimumLexicalSimilarityPercent { get; set; } = 100;
 
-    /// <summary>Minimum semantic similarity in Semantic mode, from 0 to 100.</summary>
+    /// <summary>Inclusive minimum semantic similarity in Semantic and Combined modes, from 0 to 100.</summary>
     [Parameter]
     public double MinimumSemanticSimilarityPercent { get; set; } = 80;
 
@@ -61,13 +50,6 @@ public partial class CameraSpeechMatch(
     /// <summary>Maximum recording length in seconds. Values outside 1 to 300 are clamped.</summary>
     [Parameter]
     public int MaxRecordingSeconds { get; set; } = 30;
-
-    /// <summary>
-    /// Speech recognition language. Only <c>fa</c> and <c>en</c> are supported, including region suffixes such as <c>fa-IR</c>.
-    /// When omitted, Persian is used.
-    /// </summary>
-    [Parameter]
-    public string? Language { get; set; }
 
     /// <summary>Shows the match result inside the component. When false, only <see cref="OnResult"/> receives it.</summary>
     [Parameter]
@@ -106,19 +88,16 @@ public partial class CameraSpeechMatch(
     private DotNetObjectReference<CameraSpeechMatch>? dotNetReference;
     private CameraSpeechMatchState State { get; set; } = CameraSpeechMatchState.NotStarted;
     private CameraSpeechMatchResult? LastResult { get; set; }
-    private bool matchAccepted;
     private int ElapsedSeconds { get; set; }
     private string FinalTranscript { get; set; } = string.Empty;
     private string InterimTranscript { get; set; } = string.Empty;
     private string DisplayTranscript { get; set; } = string.Empty;
-    private string effectiveLanguage = "fa";
     private string? recordedVideoPreviewUrl;
     private CancellationTokenSource attemptCancellation = new();
     private bool completionInProgress;
     private bool attemptCompletionReported;
     private bool starting;
     private bool recordingStartPending;
-    private bool capturePcmAudioForAttempt;
     private bool automaticStartCompleted;
     private int faceUpdateVersion;
     private int attemptVersion;
@@ -146,7 +125,7 @@ public partial class CameraSpeechMatch(
             ("Verification failed", Icons.Material.Outlined.ErrorOutline, Color.Error),
         CameraSpeechMatchState.Completed => LastResult switch
         {
-            { Succeeded: true } when matchAccepted =>
+            { Succeeded: true, IsAccepted: true } =>
                 ("Verified", Icons.Material.Outlined.Verified, Color.Success),
             { Succeeded: true } =>
                 ("Speech does not match", Icons.Material.Outlined.Info, Color.Warning),
@@ -214,12 +193,6 @@ public partial class CameraSpeechMatch(
     private string FormattedMaximumTime => FormatDuration(EffectiveMaxRecordingSeconds);
     private double RecordingProgressPercent =>
         (double)ElapsedSeconds / EffectiveMaxRecordingSeconds * 100d;
-    private string DisplayLanguage => NormalizeLanguage(Language) switch
-    {
-        "en" => "English",
-        "fa" => "Persian",
-        _ => "Language is not supported"
-    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -278,14 +251,6 @@ public partial class CameraSpeechMatch(
             return;
         }
 
-        string? normalizedLanguage = NormalizeLanguage(Language);
-        if (normalizedLanguage is null)
-        {
-            await CompleteFailureAsync("Speech recognition supports only Persian (fa) and English (en).");
-            return;
-        }
-        effectiveLanguage = normalizedLanguage;
-
         try
         {
             bool validFaceSizeRange = MinFaceSize > 0 && MinFaceSize <= MaxFaceSize && MaxFaceSize <= 1;
@@ -343,14 +308,6 @@ public partial class CameraSpeechMatch(
             return;
         }
 
-        string? normalizedLanguage = NormalizeLanguage(Language);
-        if (normalizedLanguage is null)
-        {
-            await CompleteFailureAsync("Speech recognition supports only Persian (fa) and English (en).");
-            return;
-        }
-        effectiveLanguage = normalizedLanguage;
-
         if (GetSpeechConfigurationError() is { } speechError)
         {
             await CompleteFailureAsync(speechError);
@@ -358,7 +315,6 @@ public partial class CameraSpeechMatch(
         }
 
         recordingStartPending = true;
-        capturePcmAudioForAttempt = CapturePcmAudio;
         int recordingAttemptVersion = attemptVersion;
         int startFaceUpdateVersion = faceUpdateVersion;
         State = CameraSpeechMatchState.Recording;
@@ -371,10 +327,7 @@ public partial class CameraSpeechMatch(
                 videoElement,
                 new
                 {
-                    language = effectiveLanguage,
-                    maxRecordingSeconds = EffectiveMaxRecordingSeconds,
-                    capturePcmAudio = capturePcmAudioForAttempt,
-                    relayUrl = ResolveRelayUrl()
+                    maxRecordingSeconds = EffectiveMaxRecordingSeconds
                 });
             if (disposed || attemptCompletionReported || attemptVersion != recordingAttemptVersion)
             {
@@ -614,8 +567,8 @@ public partial class CameraSpeechMatch(
                 return false;
             }
 
-            if ((capturePcmAudioForAttempt && pcmReference is null) || pcmReference is not null &&
-                (pcmReference.Length <= 0 || pcmReference.Length % 2 != 0 || pcmReference.Length > MaximumPcmContentBytes))
+            if (pcmReference is null || pcmReference.Length <= 0 ||
+                pcmReference.Length % 2 != 0 || pcmReference.Length > MaximumPcmContentBytes)
             {
                 await CompleteFailureAsync("The captured PCM audio is missing, invalid, or larger than the allowed size.", transcript);
                 return false;
@@ -661,28 +614,25 @@ public partial class CameraSpeechMatch(
                 return false;
             }
 
-            byte[]? pcmAudioContent = null;
-            if (pcmReference is not null)
+            byte[] pcmAudioContent;
+            try
             {
-                try
+                await using Stream pcmStream = await pcmReference.OpenReadStreamAsync(MaximumPcmContentBytes, cancellationToken);
+                using var pcmBuffer = new MemoryStream(checked((int)pcmReference.Length));
+                await pcmStream.CopyToAsync(pcmBuffer, cancellationToken);
+                pcmAudioContent = pcmBuffer.ToArray();
+                if (pcmAudioContent.LongLength != pcmReference.Length)
                 {
-                    await using Stream pcmStream = await pcmReference.OpenReadStreamAsync(MaximumPcmContentBytes, cancellationToken);
-                    using var pcmBuffer = new MemoryStream(checked((int)pcmReference.Length));
-                    await pcmStream.CopyToAsync(pcmBuffer, cancellationToken);
-                    pcmAudioContent = pcmBuffer.ToArray();
-                    if (pcmAudioContent.LongLength != pcmReference.Length)
-                    {
-                        throw new InvalidDataException("Incomplete PCM audio.");
-                    }
+                    throw new InvalidDataException("Incomplete PCM audio.");
                 }
-                catch (Exception exception) when (exception is IOException or InvalidDataException or JSException or InvalidOperationException)
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or JSException or InvalidOperationException)
+            {
+                if (IsCurrentCompletion(completionAttemptVersion))
                 {
-                    if (IsCurrentCompletion(completionAttemptVersion))
-                    {
-                        await CompleteFailureAsync("The captured PCM audio could not be read.", transcript);
-                    }
-                    return false;
+                    await CompleteFailureAsync("The captured PCM audio could not be read.", transcript);
                 }
+                return false;
             }
             if (!IsCurrentCompletion(completionAttemptVersion))
             {
@@ -695,7 +645,6 @@ public partial class CameraSpeechMatch(
                 recognizedTranscript = await sttService.TranscribeAsync(
                     new SttTranscribeRequest
                     {
-                        Language = effectiveLanguage,
                         PcmAudioContent = pcmAudioContent
                     },
                     cancellationToken);
@@ -739,14 +688,16 @@ public partial class CameraSpeechMatch(
             }
 
             SpeechTranscriptComparison comparison = SpeechTranscriptComparer.Compare(expectedText, recognizedTranscript);
-            bool accepted = matchMode == CameraSpeechMatchMode.Lexical && comparison.SimilarityPercent >= minimumLexicalSimilarityPercent;
+            bool lexicalMinimumMet = comparison.SimilarityPercent >= minimumLexicalSimilarityPercent;
             var result = new CameraSpeechMatchResult
             {
                 Succeeded = true,
                 MatchMode = matchMode,
                 LexicalSimilarityPercent = comparison.SimilarityPercent,
-                MinimumLexicalSimilarityPercent = matchMode == CameraSpeechMatchMode.Lexical ? minimumLexicalSimilarityPercent : null,
-                MinimumSemanticSimilarityPercent = matchMode == CameraSpeechMatchMode.Semantic ? minimumSemanticSimilarityPercent : null,
+                MinimumLexicalSimilarityPercent = matchMode is CameraSpeechMatchMode.Lexical or CameraSpeechMatchMode.Combined
+                    ? minimumLexicalSimilarityPercent : null,
+                MinimumSemanticSimilarityPercent = matchMode is CameraSpeechMatchMode.Semantic or CameraSpeechMatchMode.Combined
+                    ? minimumSemanticSimilarityPercent : null,
                 ExpectedText = expectedText,
                 TranscribedText = recognizedTranscript,
                 VideoContent = videoContent,
@@ -754,12 +705,13 @@ public partial class CameraSpeechMatch(
                 VideoFileName = fileName,
                 VideoContentLength = videoContent.LongLength,
                 PcmAudioContent = pcmAudioContent,
-                PcmAudioContentType = pcmAudioContent is null ? null : "application/octet-stream",
-                PcmAudioFileName = pcmAudioContent is null ? null : Path.ChangeExtension(fileName, ".pcm"),
-                PcmAudioContentLength = pcmAudioContent?.LongLength ?? 0
+                PcmAudioContentType = "application/octet-stream",
+                PcmAudioFileName = Path.ChangeExtension(fileName, ".pcm"),
+                PcmAudioContentLength = pcmAudioContent.LongLength
             };
 
-            if (matchMode == CameraSpeechMatchMode.Semantic)
+            if (matchMode == CameraSpeechMatchMode.Semantic ||
+                matchMode == CameraSpeechMatchMode.Combined && lexicalMinimumMet)
             {
                 try
                 {
@@ -777,7 +729,6 @@ public partial class CameraSpeechMatch(
                     }
 
                     result.SemanticSimilarityPercent = probability * 100;
-                    accepted = result.SemanticSimilarityPercent >= minimumSemanticSimilarityPercent;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -800,8 +751,14 @@ public partial class CameraSpeechMatch(
                 return false;
             }
 
+            result.IsAccepted = matchMode switch
+            {
+                CameraSpeechMatchMode.Lexical => lexicalMinimumMet,
+                CameraSpeechMatchMode.Semantic => result.SemanticSimilarityPercent >= minimumSemanticSimilarityPercent,
+                CameraSpeechMatchMode.Combined => lexicalMinimumMet && result.SemanticSimilarityPercent >= minimumSemanticSimilarityPercent,
+                _ => false
+            };
             attemptCompletionReported = true;
-            matchAccepted = accepted;
             LastResult = result;
             recordedVideoPreviewUrl = videoPreviewUrl;
             State = CameraSpeechMatchState.Completed;
@@ -835,23 +792,20 @@ public partial class CameraSpeechMatch(
             ? null
             : "Speech recognition is not configured.";
 
-    private string? ResolveRelayUrl() =>
-        string.IsNullOrWhiteSpace(SpeechRelayUrl) ? null : SpeechRelayUrl.Trim();
-
     private string? GetMatchConfigurationError(CameraSpeechMatchMode matchMode, double minimumLexicalSimilarityPercent, double minimumSemanticSimilarityPercent)
     {
-        if (matchMode is not (CameraSpeechMatchMode.Lexical or CameraSpeechMatchMode.Semantic))
+        if (matchMode is not (CameraSpeechMatchMode.Lexical or CameraSpeechMatchMode.Semantic or CameraSpeechMatchMode.Combined))
         {
             return "The speech match mode is not valid.";
         }
 
-        if (matchMode == CameraSpeechMatchMode.Lexical &&
+        if (matchMode is (CameraSpeechMatchMode.Lexical or CameraSpeechMatchMode.Combined) &&
             (!double.IsFinite(minimumLexicalSimilarityPercent) || minimumLexicalSimilarityPercent is < 0 or > 100))
         {
             return "The minimum lexical similarity percent must be between 0 and 100.";
         }
 
-        if (matchMode == CameraSpeechMatchMode.Semantic)
+        if (matchMode is CameraSpeechMatchMode.Semantic or CameraSpeechMatchMode.Combined)
         {
             if (!double.IsFinite(minimumSemanticSimilarityPercent) || minimumSemanticSimilarityPercent is < 0 or > 100)
             {
@@ -923,7 +877,7 @@ public partial class CameraSpeechMatch(
         int failureAttemptVersion = attemptVersion;
         LastResult = result ?? CreateFailureResult(message, transcribedText);
         LastResult.Succeeded = false;
-        matchAccepted = false;
+        LastResult.IsAccepted = false;
         LastResult.VideoContent = null;
         LastResult.PcmAudioContent = null;
         LastResult.ErrorMessage = message;
@@ -942,10 +896,10 @@ public partial class CameraSpeechMatch(
         {
             Succeeded = false,
             MatchMode = MatchMode,
-            MinimumLexicalSimilarityPercent = MatchMode == CameraSpeechMatchMode.Lexical &&
+            MinimumLexicalSimilarityPercent = MatchMode is (CameraSpeechMatchMode.Lexical or CameraSpeechMatchMode.Combined) &&
                 double.IsFinite(MinimumLexicalSimilarityPercent) && MinimumLexicalSimilarityPercent is >= 0 and <= 100
                 ? MinimumLexicalSimilarityPercent : null,
-            MinimumSemanticSimilarityPercent = MatchMode == CameraSpeechMatchMode.Semantic &&
+            MinimumSemanticSimilarityPercent = MatchMode is (CameraSpeechMatchMode.Semantic or CameraSpeechMatchMode.Combined) &&
                 double.IsFinite(MinimumSemanticSimilarityPercent) && MinimumSemanticSimilarityPercent is >= 0 and <= 100
                 ? MinimumSemanticSimilarityPercent : null,
             LexicalSimilarityPercent = 0,
@@ -963,12 +917,10 @@ public partial class CameraSpeechMatch(
         attemptCancellation = new CancellationTokenSource();
         completionInProgress = false;
         recordingStartPending = false;
-        capturePcmAudioForAttempt = false;
         automaticStartCompleted = false;
         IsFaceVisible = false;
         attemptCompletionReported = false;
         LastResult = null;
-        matchAccepted = false;
         recordedVideoPreviewUrl = null;
         ElapsedSeconds = 0;
         FinalTranscript = string.Empty;
@@ -994,27 +946,11 @@ public partial class CameraSpeechMatch(
         return extension.Length > 0;
     }
 
-    private static string? NormalizeLanguage(string? language)
-    {
-        if (string.IsNullOrWhiteSpace(language))
-        {
-            return "fa";
-        }
-
-        string primaryLanguage = language
-            .Trim()
-            .Split(['-', '_'], 2, StringSplitOptions.None)[0]
-            .ToLowerInvariant();
-
-        return primaryLanguage is "fa" or "en" ? primaryLanguage : null;
-    }
-
     private static string GetSpeechErrorMessage(string? errorCode) => errorCode switch
     {
         "permission_denied" => "Camera or microphone permission was denied.",
         "microphone_unavailable" => "The microphone is unavailable or in use by another application.",
         "unsupported_browser" => "This browser does not support the features required for recording and speech recognition.",
-        "unsupported_language" => "Speech recognition supports only Persian (fa) and English (en).",
         "recording_failure" => "Video recording failed.",
         "pcm_capture_failed" => "Audio capture failed. Please record again.",
         "empty_content" => "The recorded video is empty. Please try again.",
@@ -1061,9 +997,6 @@ public partial class CameraSpeechMatch(
             _ when browserMessage.Contains("not supported", StringComparison.OrdinalIgnoreCase) ||
                    browserMessage.Contains("unsupported", StringComparison.OrdinalIgnoreCase) =>
                 "This browser does not support the features required for video recording.",
-            _ when browserMessage.Contains("Persian", StringComparison.OrdinalIgnoreCase) ||
-                   browserMessage.Contains("English", StringComparison.OrdinalIgnoreCase) =>
-                "Speech recognition supports only Persian (fa) and English (en).",
             _ when browserMessage.Contains("no longer available", StringComparison.OrdinalIgnoreCase) =>
                 "The camera or microphone is no longer available. Please try again.",
             _ when browserMessage.Contains("not initialized", StringComparison.OrdinalIgnoreCase) =>

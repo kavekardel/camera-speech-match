@@ -18,9 +18,10 @@
                 <MudSelect @bind-Value="MatchMode" Label="Matching mode" T="CameraSpeechMatchMode">
                     <MudSelectItem Value="CameraSpeechMatchMode.Lexical">Lexical</MudSelectItem>
                     <MudSelectItem Value="CameraSpeechMatchMode.Semantic">Semantic</MudSelectItem>
+                    <MudSelectItem Value="CameraSpeechMatchMode.Combined">Combined</MudSelectItem>
                 </MudSelect>
             </MudItem>
-            @if (MatchMode == CameraSpeechMatchMode.Lexical)
+            @if (MatchMode is CameraSpeechMatchMode.Lexical or CameraSpeechMatchMode.Combined)
             {
                 <MudItem xs="12" md="6">
                     <MudNumericField @bind-Value="MinimumLexicalSimilarityPercent"
@@ -30,7 +31,7 @@
                                      Step="1" />
                 </MudItem>
             }
-            else if (MatchMode == CameraSpeechMatchMode.Semantic)
+            @if (MatchMode is CameraSpeechMatchMode.Semantic or CameraSpeechMatchMode.Combined)
             {
                 <MudItem xs="12" md="6">
                     <MudNumericField @bind-Value="MinimumSemanticSimilarityPercent"
@@ -38,7 +39,7 @@
                                      Min="0"
                                      Max="100"
                                      Step="1"
-                                     HelperText="Percentage from 0 to 100. Semantic mode needs a registered matcher." />
+                                     HelperText="Percentage from 0 to 100. Semantic and Combined modes need a registered matcher." />
                 </MudItem>
             }
         </MudGrid>
@@ -48,8 +49,6 @@
                        MatchMode="@MatchMode"
                        MinimumLexicalSimilarityPercent="@MinimumLexicalSimilarityPercent"
                        MinimumSemanticSimilarityPercent="@MinimumSemanticSimilarityPercent"
-                       Language="en-US"
-                       CapturePcmAudio="true"
                        MaxRecordingSeconds="30"
                        OnResult="HandleVerificationResult"
                        OnReset="ClearVerificationResult"
@@ -61,6 +60,7 @@
             <MudText Typo="Typo.h6" Class="mb-3">Latest result</MudText>
             <MudStack Spacing="1">
                 <MudText>Succeeded: @result.Succeeded</MudText>
+                <MudText>Accepted: @result.IsAccepted</MudText>
                 <MudText>Matching mode: @result.MatchMode</MudText>
                 <MudText>Lexical similarity: @result.LexicalSimilarityPercent.ToString("0.##")%</MudText>
                 @if (result.MinimumLexicalSimilarityPercent is { } minimumLexical)
@@ -70,6 +70,10 @@
                 @if (result.SemanticSimilarityPercent is { } semanticPercent)
                 {
                     <MudText>Semantic similarity: @semanticPercent.ToString("0.##")%</MudText>
+                }
+                else if (result is { Succeeded: true, MatchMode: CameraSpeechMatchMode.Combined })
+                {
+                    <MudText>Semantic similarity: Not evaluated because the lexical minimum was not met.</MudText>
                 }
                 @if (result.MinimumSemanticSimilarityPercent is { } minimumSemantic)
                 {

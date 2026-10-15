@@ -5,7 +5,6 @@ import {
     createStreamingTranscriptState,
     disposeSpeechSession,
     getSpeechSessionOutcome,
-    normalizeSpeechLanguage,
     startSpeechSession,
     stopSpeechSession
 } from "./speech-session.js";
@@ -100,13 +99,6 @@ export async function startRecording(videoElement, options) {
     if (session.recorder) {
         return true;
     }
-    const language = normalizeSpeechLanguage(options?.language, "fa");
-
-    if (!language) {
-        stopTracks(session);
-        throw new Error("Only Persian (fa) and English (en) speech recognition are supported.");
-    }
-
     if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
         stopTracks(session);
         throw new Error("Video recording is not supported in this browser.");
@@ -123,34 +115,31 @@ export async function startRecording(videoElement, options) {
         throw new Error("This browser does not provide a supported WebM or MP4 recording format.");
     }
 
-    let pcmRecording = null;
-    if (options?.capturePcmAudio === true) {
-        pcmRecording = createPcmRecording(session.stream,
-            () => failAttempt(session, "pcm_capture_failed", attemptId));
-        session.pcmRecording = pcmRecording;
-        try {
-            await pcmRecording.prepare();
-        } catch (error) {
-            if (!isCurrentAttempt(session, attemptId)) {
-                return false;
-            }
-            stopTracks(session);
-            throw error;
-        }
-        if (!isCurrentAttempt(session, attemptId) || session.completionClaimed || session.finalizing) {
-            await pcmRecording.dispose();
+    const pcmRecording = createPcmRecording(session.stream,
+        () => failAttempt(session, "pcm_capture_failed", attemptId));
+    session.pcmRecording = pcmRecording;
+    try {
+        await pcmRecording.prepare();
+    } catch (error) {
+        if (!isCurrentAttempt(session, attemptId)) {
             return false;
         }
-        if (!hasLiveCameraAndMicrophone(session.stream)) {
-            stopTracks(session);
-            throw new Error("The camera or microphone is no longer available. Please retry.");
-        }
+        stopTracks(session);
+        throw error;
+    }
+    if (!isCurrentAttempt(session, attemptId) || session.completionClaimed || session.finalizing) {
+        await pcmRecording.dispose();
+        return false;
+    }
+    if (!hasLiveCameraAndMicrophone(session.stream)) {
+        stopTracks(session);
+        throw new Error("The camera or microphone is no longer available. Please retry.");
     }
 
     // Recheck browser-local evidence after any asynchronous audio preparation.
     // A delayed Blazor callback may refer to a face that has already disappeared.
     if (!session.faceTracker?.startRecordingValidation()) {
-        await pcmRecording?.dispose();
+        await pcmRecording.dispose();
         if (session.pcmRecording === pcmRecording) {
             session.pcmRecording = null;
         }
@@ -180,7 +169,7 @@ export async function startRecording(videoElement, options) {
         session.speechSession = relayUrl.length === 0
             ? null
             : createSpeechSession({
-                language,
+                language: options?.language,
                 stream: session.stream,
                 stopTracksOnRelease: true,
                 requireGatewayCompletion: true,
@@ -200,7 +189,7 @@ export async function startRecording(videoElement, options) {
 
         session.startedAt = performance.now();
         session.recorder.start(1000);
-        pcmRecording?.start();
+        pcmRecording.start();
         notifyElapsedTime(session, 0);
 
         session.tickTimerId = window.setInterval(() => {
@@ -337,7 +326,7 @@ async function finalizeAttemptCore(session, attemptId) {
             await failAttempt(session, "empty_content");
             return;
         }
-        if (pcmBlob && pcmBlob.size === 0) {
+        if (!pcmBlob || pcmBlob.size === 0) {
             await failAttempt(session, "pcm_capture_failed");
             return;
         }
@@ -380,7 +369,7 @@ function updateTranscript(session, text, isFinal) {
         transcript.display);
 }
 
-async function completeAttempt(session, transcript, videoBlob, faceValidationPassed = false, pcmBlob = null) {
+async function completeAttempt(session, transcript, videoBlob, faceValidationPassed, pcmBlob) {
     const attemptId = session.attemptId;
     if (!faceValidationPassed) {
         await failAttempt(session, "face_not_visible");
@@ -402,16 +391,12 @@ async function completeAttempt(session, transcript, videoBlob, faceValidationPas
 
     const contentType = (videoBlob.type || session.mimeType).split(";", 1)[0].toLowerCase();
     const videoStreamReference = DotNet.createJSStreamReference(videoBlob);
-    const pcmStreamReference = pcmBlob ? DotNet.createJSStreamReference(pcmBlob) : null;
+    const pcmStreamReference = DotNet.createJSStreamReference(pcmBlob);
     clearRecording(session);
     stopTracks(session);
     showRecordedVideo(session);
-    const completionArguments = [transcript ?? "", videoStreamReference, contentType, session.previewUrl, faceValidationPassed];
-    if (pcmStreamReference) {
-        completionArguments.push(pcmStreamReference);
-    }
-    const accepted = await invokeDotNet(session,
-        pcmStreamReference ? "OnTranscriptionCompletedWithPcm" : "OnTranscriptionCompleted", ...completionArguments);
+    const accepted = await invokeDotNet(session, "OnTranscriptionCompletedWithPcm",
+        transcript ?? "", videoStreamReference, contentType, session.previewUrl, faceValidationPassed, pcmStreamReference);
 
     if (isCurrentAttempt(session, attemptId) && accepted !== true) {
         clearVideoPlayback(session);

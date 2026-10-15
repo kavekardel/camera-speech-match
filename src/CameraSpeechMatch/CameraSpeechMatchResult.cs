@@ -4,22 +4,28 @@ public sealed class CameraSpeechMatchResult
 {
     /// <summary>
     /// Whether recording processing completed successfully.
-    /// Match scores are reported separately and do not determine processing success.
+    /// Acceptance is reported by <see cref="IsAccepted"/> and does not determine processing success.
     /// </summary>
     public bool Succeeded { get; set; }
+
+    /// <summary>
+    /// Whether processing succeeded and all minimum similarities required by the selected mode were met.
+    /// False for completed mismatches and processing failures.
+    /// </summary>
+    public bool IsAccepted { get; set; }
 
     public CameraSpeechMatchMode MatchMode { get; set; } = CameraSpeechMatchMode.Lexical;
 
     /// <summary>Normalized wording similarity from 0 to 100, independent of semantic acceptance.</summary>
     public double LexicalSimilarityPercent { get; set; }
 
-    /// <summary>The minimum similarity captured for this Lexical attempt; null in Semantic mode.</summary>
+    /// <summary>The minimum lexical similarity captured for a Lexical or Combined attempt; null in Semantic mode.</summary>
     public double? MinimumLexicalSimilarityPercent { get; set; }
 
-    /// <summary>Semantic similarity from 0 to 100; null in Lexical mode.</summary>
+    /// <summary>Semantic similarity from 0 to 100; null when not evaluated, including a Combined lexical mismatch.</summary>
     public double? SemanticSimilarityPercent { get; set; }
 
-    /// <summary>The minimum semantic similarity percentage captured for this attempt; null in Lexical mode.</summary>
+    /// <summary>The minimum semantic similarity captured for a Semantic or Combined attempt; null in Lexical mode.</summary>
     public double? MinimumSemanticSimilarityPercent { get; set; }
 
     public string ExpectedText { get; set; } = string.Empty;
@@ -37,7 +43,7 @@ public sealed class CameraSpeechMatchResult
 
     /// <summary>
     /// Raw mono, 16 kHz, signed 16-bit little-endian PCM audio captured during video recording.
-    /// Available when CapturePcmAudio is enabled and processing succeeds; otherwise null.
+    /// Captured automatically and available when processing succeeds; otherwise null.
     /// </summary>
     public byte[]? PcmAudioContent { get; set; }
 

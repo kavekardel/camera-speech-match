@@ -30,11 +30,12 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
     Task IAsyncLifetime.DisposeAsync() => base.DisposeAsync().AsTask();
 
     [Theory]
-    [InlineData(CameraSpeechMatchMode.Lexical, "Hello world", 0, "The wording matches")]
-    [InlineData(CameraSpeechMatchMode.Lexical, "Different words", 0, "The wording does not match")]
-    [InlineData(CameraSpeechMatchMode.Semantic, "A paraphrase", 0.8, "The meaning matches")]
-    [InlineData(CameraSpeechMatchMode.Semantic, "Different meaning", 0.79, "The meaning does not match")]
-    public async Task Complete_PcmProviderResultDrivesMatchingAndPlayback(CameraSpeechMatchMode mode, string transcript, double probability, string matchMessage)
+    [InlineData(CameraSpeechMatchMode.Lexical, "Hello world", 0, true, "The wording matches")]
+    [InlineData(CameraSpeechMatchMode.Lexical, "Different words", 0, false, "The wording does not match")]
+    [InlineData(CameraSpeechMatchMode.Semantic, "A paraphrase", 0.8, true, "The meaning matches")]
+    [InlineData(CameraSpeechMatchMode.Semantic, "Different meaning", 0.79, false, "The meaning does not match")]
+    public async Task Complete_PcmProviderResultDrivesMatchingAndPlayback(CameraSpeechMatchMode mode, string transcript, double probability,
+        bool accepted, string matchMessage)
     {
         stt.Text = transcript;
         matcher.Probability = probability;
@@ -47,6 +48,7 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         Assert.True(completed);
         var result = Assert.Single(results);
         Assert.True(result.Succeeded);
+        Assert.Equal(accepted, result.IsAccepted);
         Assert.Equal(matchMessage, component.Find(".camera-speech-match__result-summary strong").TextContent);
         Assert.InRange(result.LexicalSimilarityPercent, 0, 100);
         Assert.Equal(mode == CameraSpeechMatchMode.Lexical ? (double?)100 : null, result.MinimumLexicalSimilarityPercent);
@@ -62,7 +64,6 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         Assert.EndsWith(".pcm", result.PcmAudioFileName);
         Assert.Equal(Path.GetFileNameWithoutExtension(result.VideoFileName), Path.GetFileNameWithoutExtension(result.PcmAudioFileName));
         Assert.Equal("video/webm", result.VideoContentType);
-        Assert.Equal("en", stt.Requests[0].Language);
         Assert.Equal("blob:recording", component.Find("video").GetAttribute("src"));
         Assert.NotNull(component.Find("video").GetAttribute("controls"));
         Assert.Equal(mode == CameraSpeechMatchMode.Semantic ? 1 : 0, matcher.Calls);
@@ -91,11 +92,11 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
     }
 
     [Theory]
-    [InlineData(0, "The wording matches")]
-    [InlineData(66.67, "The wording matches")]
-    [InlineData(66.68, "The wording does not match")]
-    [InlineData(100, "The wording does not match")]
-    public async Task Complete_LexicalSimilarityUsesCapturedMinimum(double minimum, string matchMessage)
+    [InlineData(0, true, "The wording matches")]
+    [InlineData(66.67, true, "The wording matches")]
+    [InlineData(66.68, false, "The wording does not match")]
+    [InlineData(100, false, "The wording does not match")]
+    public async Task Complete_LexicalSimilarityUsesCapturedMinimum(double minimum, bool accepted, string matchMessage)
     {
         stt.Text = "Hello world again";
         var component = await StartAsync(minimumLexical: minimum);
@@ -105,6 +106,7 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         var result = Assert.Single(results);
         Assert.True(result.Succeeded);
         Assert.Equal(66.67, result.LexicalSimilarityPercent);
+        Assert.Equal(accepted, result.IsAccepted);
         Assert.Equal(minimum, result.MinimumLexicalSimilarityPercent);
         Assert.Null(result.SemanticSimilarityPercent);
         Assert.Null(result.MinimumSemanticSimilarityPercent);
@@ -130,6 +132,7 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
 
         var result = Assert.Single(results);
         Assert.False(result.Succeeded);
+        Assert.False(result.IsAccepted);
         Assert.Null(result.MinimumLexicalSimilarityPercent);
         Assert.Null(result.MinimumSemanticSimilarityPercent);
         Assert.Contains("between 0 and 100", result.ErrorMessage);
@@ -155,6 +158,7 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         var result = Assert.Single(results);
         Assert.True(result.Succeeded);
         Assert.Equal(expectedPercent, result.SemanticSimilarityPercent);
+        Assert.Equal(accepted, result.IsAccepted);
         Assert.Equal(minimum, result.MinimumSemanticSimilarityPercent);
         Assert.Null(result.MinimumLexicalSimilarityPercent);
         Assert.Equal(accepted ? "The meaning matches" : "The meaning does not match",
@@ -162,6 +166,139 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         Assert.Equal($"{expectedPercent:0.##}%", component.Find(".camera-speech-match__result-metric .camera-speech-match__score").TextContent);
         Assert.Contains($"Minimum required: {minimum:0.##}%", component.Markup);
         Assert.Equal(1, matcher.Calls);
+    }
+
+    [Theory]
+    [InlineData("Hello world again", 66.68, double.NaN, 80, 66.67, false, 0)]
+    [InlineData("Hello world again", 66.67, 0.79, 80, 66.67, false, 1)]
+    [InlineData("Hello world again", 66.67, 0.8, 80, 66.67, true, 1)]
+    [InlineData("Hello world again", 66.66, 0.81, 80, 66.67, true, 1)]
+    [InlineData("Hello world", 100, 1, 100, 100, true, 1)]
+    [InlineData("Different words", 0, 0, 0, 0, true, 1)]
+    public async Task Complete_CombinedRequiresBothMinimumsAndSkipsSemanticOnLexicalFailure(string transcript,
+        double minimumLexical, double probability, double minimumSemantic, double expectedLexical, bool accepted, int semanticCalls)
+    {
+        stt.Text = transcript;
+        matcher.Probability = probability;
+        var component = await StartAsync(CameraSpeechMatchMode.Combined, minimumLexical, minimumSemantic);
+        var video = new MediaStream([1, 2]);
+        var pcm = new MediaStream([3, 4]);
+
+        Assert.True(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompletedWithPcm(
+            "", video, "video/webm", "blob:combined", true, pcm)));
+
+        var result = Assert.Single(results);
+        Assert.True(result.Succeeded);
+        Assert.Equal(accepted, result.IsAccepted);
+        Assert.Equal(CameraSpeechMatchMode.Combined, result.MatchMode);
+        Assert.Equal(expectedLexical, result.LexicalSimilarityPercent);
+        Assert.Equal(minimumLexical, result.MinimumLexicalSimilarityPercent);
+        Assert.Equal(minimumSemantic, result.MinimumSemanticSimilarityPercent);
+        Assert.Equal(semanticCalls == 0 ? (double?)null : probability * 100, result.SemanticSimilarityPercent);
+        Assert.Equal(semanticCalls, matcher.Calls);
+        Assert.Equal(video.Content, result.VideoContent);
+        Assert.Equal(pcm.Content, result.PcmAudioContent);
+        Assert.Null(result.ErrorMessage);
+        Assert.Equal("blob:combined", component.Find("video").GetAttribute("src"));
+        Assert.NotNull(component.Find("video").GetAttribute("controls"));
+        Assert.Equal(accepted ? "The wording and meaning match" : "The wording and meaning do not both match",
+            component.Find(".camera-speech-match__result-summary strong").TextContent);
+        Assert.Contains(accepted ? "Verified" : "Speech does not match", component.Find(".camera-speech-match__status").TextContent);
+
+        var metrics = component.FindAll(".camera-speech-match__result-metric");
+        Assert.Contains($"Minimum required: {minimumLexical:0.##}%", metrics.Single(metric => metric.TextContent.Contains("Lexical similarity")).TextContent);
+        Assert.Contains($"Minimum required: {minimumSemantic:0.##}%", metrics.Single(metric => metric.TextContent.Contains("Semantic similarity")).TextContent);
+        Assert.Equal(semanticCalls == 0, component.Markup.Contains("Not evaluated because the lexical minimum was not met."));
+
+        Assert.False(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompletedWithPcm(
+            "", new MediaStream([1, 2]), "video/webm", "blob:duplicate", true, new MediaStream([3, 4]))));
+        Assert.Single(results);
+        Assert.Single(stt.Requests);
+        Assert.Equal(semanticCalls, matcher.Calls);
+    }
+
+    [Theory]
+    [InlineData(-1, 80, "lexical")]
+    [InlineData(101, 80, "lexical")]
+    [InlineData(double.NaN, 80, "lexical")]
+    [InlineData(double.PositiveInfinity, 80, "lexical")]
+    [InlineData(100, -1, "semantic")]
+    [InlineData(100, 101, "semantic")]
+    [InlineData(100, double.NaN, "semantic")]
+    [InlineData(100, double.PositiveInfinity, "semantic")]
+    public async Task Start_CombinedRejectsEitherInvalidMinimum(double minimumLexical, double minimumSemantic, string invalidMinimum)
+    {
+        await StartAsync(CameraSpeechMatchMode.Combined, minimumLexical, minimumSemantic);
+
+        var result = Assert.Single(results);
+        Assert.False(result.Succeeded);
+        Assert.False(result.IsAccepted);
+        Assert.Contains($"minimum {invalidMinimum} similarity", result.ErrorMessage);
+        Assert.Equal(invalidMinimum == "lexical" ? null : (double?)minimumLexical, result.MinimumLexicalSimilarityPercent);
+        Assert.Equal(invalidMinimum == "semantic" ? null : (double?)minimumSemantic, result.MinimumSemanticSimilarityPercent);
+        Assert.Empty(stt.Requests);
+        Assert.Equal(0, matcher.Calls);
+    }
+
+    [Theory]
+    [InlineData(CameraSpeechMatchMode.Semantic)]
+    [InlineData(CameraSpeechMatchMode.Combined)]
+    public async Task Start_SemanticModesRequireAvailableMatcher(CameraSpeechMatchMode mode)
+    {
+        matcher.IsAvailable = false;
+        await StartAsync(mode);
+
+        var result = Assert.Single(results);
+        Assert.False(result.Succeeded);
+        Assert.False(result.IsAccepted);
+        Assert.Contains("Semantic speech matching is not available", result.ErrorMessage);
+        Assert.Empty(stt.Requests);
+        Assert.Equal(0, matcher.Calls);
+    }
+
+    [Theory]
+    [InlineData(CameraSpeechMatchMode.Lexical, 100, double.NaN)]
+    [InlineData(CameraSpeechMatchMode.Semantic, double.NaN, 80)]
+    public async Task Complete_SingleModeIgnoresInactiveMinimum(CameraSpeechMatchMode mode, double minimumLexical, double minimumSemantic)
+    {
+        matcher.IsAvailable = mode != CameraSpeechMatchMode.Lexical;
+        var component = await StartAsync(mode, minimumLexical, minimumSemantic);
+        Assert.True(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompletedWithPcm(
+            "", new MediaStream([1, 2]), "video/webm", "blob:test", true, new MediaStream([3, 4]))));
+        Assert.True(Assert.Single(results).IsAccepted);
+        Assert.Equal(mode == CameraSpeechMatchMode.Semantic ? 1 : 0, matcher.Calls);
+    }
+
+    [Theory]
+    [InlineData(0.8, true)]
+    [InlineData(0.79, false)]
+    public async Task Complete_AcceptanceBadgeRemainsVisibleWithoutResultDetails(double probability, bool accepted)
+    {
+        matcher.Probability = probability;
+        var component = await StartAsync(CameraSpeechMatchMode.Combined, showResultDetails: false);
+        Assert.True(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompletedWithPcm(
+            "", new MediaStream([1, 2]), "video/webm", "blob:test", true, new MediaStream([3, 4]))));
+
+        Assert.Equal(accepted, Assert.Single(results).IsAccepted);
+        Assert.Contains(accepted ? "Verified" : "Speech does not match", component.Find(".camera-speech-match__status").TextContent);
+        Assert.Empty(component.FindAll(".camera-speech-match__result"));
+    }
+
+    [Theory]
+    [InlineData(CameraSpeechMatchMode.Lexical, true, false)]
+    [InlineData(CameraSpeechMatchMode.Semantic, false, true)]
+    [InlineData(CameraSpeechMatchMode.Combined, true, true)]
+    public async Task Sample_SelectedModeShowsItsMinimumInputs(CameraSpeechMatchMode mode, bool lexicalInput, bool semanticInput)
+    {
+        Render<MudPopoverProvider>();
+        var page = Render<global::CameraSpeechMatchSample.Components.Pages.Home>();
+        var selector = page.FindComponent<MudSelect<CameraSpeechMatchMode>>();
+        await page.InvokeAsync(() => selector.Instance.ValueChanged.InvokeAsync(mode));
+
+        var labels = page.FindComponents<MudNumericField<double>>().Select(field => field.Instance.Label).ToArray();
+        Assert.Equal(lexicalInput, labels.Contains("Minimum lexical similarity (%)"));
+        Assert.Equal(semanticInput, labels.Contains("Minimum semantic similarity (%)"));
+        Assert.Equal(mode, page.FindComponent<Component>().Instance.MatchMode);
     }
 
     [Fact]
@@ -189,16 +326,19 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         Assert.Equal(0, matcher.Calls);
     }
 
-    [Fact]
-    public async Task Complete_SemanticFailureClearsVideoAndPcm()
+    [Theory]
+    [InlineData(CameraSpeechMatchMode.Semantic)]
+    [InlineData(CameraSpeechMatchMode.Combined)]
+    public async Task Complete_SemanticFailureClearsVideoAndPcm(CameraSpeechMatchMode mode)
     {
         matcher.Probability = double.NaN;
-        var component = await StartAsync(CameraSpeechMatchMode.Semantic);
+        var component = await StartAsync(mode);
         Assert.False(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompletedWithPcm(
             "", new MediaStream([1, 2]), "video/webm", "blob:test", true, new MediaStream([3, 4]))));
 
         var result = Assert.Single(results);
         Assert.False(result.Succeeded);
+        Assert.False(result.IsAccepted);
         Assert.Null(result.VideoContent);
         Assert.Null(result.PcmAudioContent);
         Assert.NotNull(Assert.Single(stt.Requests).PcmAudioContent);
@@ -223,28 +363,27 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         Assert.Empty(stt.Requests);
     }
 
-    [Fact]
-    public async Task Complete_MissingOptedInPcmFailsWithoutProviderCall()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Complete_MissingPcmFailsBeforeReadingMedia(bool usePcmCallback)
     {
         var component = await StartAsync();
-        Assert.False(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompleted(
-            "", new MediaStream([1, 2]), "video/webm", "blob:test", true)));
+        var video = new MediaStream([1, 2]);
+        bool completed = await component.InvokeAsync(() => usePcmCallback
+            ? component.Instance.OnTranscriptionCompletedWithPcm("", video, "video/webm", "blob:test", true, null!)
+            : component.Instance.OnTranscriptionCompleted("", video, "video/webm", "blob:test", true));
+        Assert.False(completed);
+        Assert.Equal(0, video.Reads);
+        Assert.True(video.Disposed);
         Assert.Empty(stt.Requests);
-    }
-
-    [Fact]
-    public async Task Complete_ExistingCallbackStillWorksWithCaptureDisabled()
-    {
-        var component = await StartAsync(capture: false);
-        Assert.True(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompleted(
-            "", new MediaStream([1, 2]), "video/mp4", "blob:test", true)));
-        Assert.Null(Assert.Single(stt.Requests).PcmAudioContent);
-        Assert.Null(Assert.Single(results).PcmAudioContent);
+        var result = Assert.Single(results);
+        Assert.False(result.Succeeded);
+        Assert.Contains("PCM audio is missing", result.ErrorMessage);
+        Assert.Null(result.PcmAudioContent);
         Assert.Null(results[0].PcmAudioContentType);
         Assert.Null(results[0].PcmAudioFileName);
         Assert.Equal(0, results[0].PcmAudioContentLength);
-        Assert.True(Assert.Single(results).Succeeded);
-        Assert.Contains("Verified", component.Find(".camera-speech-match__status").TextContent);
     }
 
     [Fact]
@@ -271,18 +410,56 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
         Assert.Empty(results);
     }
 
-    private async Task<IRenderedComponent<Component>> StartAsync(CameraSpeechMatchMode mode = CameraSpeechMatchMode.Lexical, bool capture = true,
-        double minimumLexical = 100, double minimumSemantic = 80)
+    [Theory]
+    [InlineData(CameraSpeechMatchMode.Semantic)]
+    [InlineData(CameraSpeechMatchMode.Combined)]
+    public async Task Complete_SemanticProviderErrorReportsProcessingFailure(CameraSpeechMatchMode mode)
+    {
+        matcher.Handler = _ => throw new HttpRequestException("Provider unavailable");
+        var component = await StartAsync(mode);
+        Assert.False(await component.InvokeAsync(() => component.Instance.OnTranscriptionCompletedWithPcm(
+            "", new MediaStream([1, 2]), "video/webm", "blob:test", true, new MediaStream([3, 4]))));
+
+        var result = Assert.Single(results);
+        Assert.False(result.Succeeded);
+        Assert.False(result.IsAccepted);
+        Assert.Null(result.VideoContent);
+        Assert.Null(result.PcmAudioContent);
+        Assert.Contains("could not be compared by meaning", result.ErrorMessage);
+        Assert.Equal(1, matcher.Calls);
+    }
+
+    [Theory]
+    [InlineData(CameraSpeechMatchMode.Semantic)]
+    [InlineData(CameraSpeechMatchMode.Combined)]
+    public async Task Complete_DisposalCancelsPendingSemanticComparisonAndReportsNoResult(CameraSpeechMatchMode mode)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        matcher.Handler = async token => { entered.SetResult(); await Task.Delay(Timeout.Infinite, token); return 0; };
+        var component = await StartAsync(mode);
+        var video = new MediaStream([1, 2]);
+        var pcm = new MediaStream([3, 4]);
+        Task<bool> pending = component.InvokeAsync(() => component.Instance.OnTranscriptionCompletedWithPcm(
+            "", video, "video/webm", "blob:test", true, pcm));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await component.InvokeAsync(() => component.Instance.DisposeAsync().AsTask());
+
+        Assert.False(await pending);
+        Assert.Empty(results);
+        Assert.Equal(1, matcher.Calls);
+        Assert.True(video.Disposed && pcm.Disposed);
+    }
+
+    private async Task<IRenderedComponent<Component>> StartAsync(CameraSpeechMatchMode mode = CameraSpeechMatchMode.Lexical,
+        double minimumLexical = 100, double minimumSemantic = 80, bool showResultDetails = true)
     {
         Render<MudPopoverProvider>();
         var component = Render<Component>(parameters => parameters
             .Add(p => p.ExpectedText, "Hello world")
-            .Add(p => p.Language, "en-US")
             .Add(p => p.MatchMode, mode)
             .Add(p => p.MinimumLexicalSimilarityPercent, minimumLexical)
             .Add(p => p.MinimumSemanticSimilarityPercent, minimumSemantic)
-            .Add(p => p.ShowResultDetails, true)
-            .Add(p => p.CapturePcmAudio, capture)
+            .Add(p => p.ShowResultDetails, showResultDetails)
             .Add(p => p.OnResult, result => results.Add(result)));
         await component.FindAll("button").First(button => button.TextContent.Contains("Start recording")).ClickAsync(new MouseEventArgs());
         await component.InvokeAsync(() => component.Instance.OnFacePositionChanged("valid", true));
@@ -303,13 +480,14 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
     }
     private sealed class Matcher : ISystemOneService
     {
-        public bool IsAvailable => true;
+        public bool IsAvailable { get; set; } = true;
         public double Probability { get; set; } = 0.9;
+        public Func<CancellationToken, Task<double>>? Handler { get; set; }
         public int Calls { get; private set; }
         public Task<double> MatchProbabilityAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult(Probability);
+            return Handler?.Invoke(cancellationToken) ?? Task.FromResult(Probability);
         }
     }
     private sealed class MediaStream(byte[] content) : IJSStreamReference
