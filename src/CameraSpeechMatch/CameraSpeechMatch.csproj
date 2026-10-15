@@ -6,7 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
-
   <ItemGroup>
     <StaticWebAssetContentTypeMapping Include="application/octet-stream" Pattern="*.task" Priority="1" />
   </ItemGroup>

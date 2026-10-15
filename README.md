@@ -2,7 +2,7 @@
 
 A .NET 10 Blazor component that records a person reading a prompt, checks face visibility in the camera preview, and compares a speech transcript with the prompt. The UI uses MudBlazor 8, and the repository includes a Blazor Interactive Server sample.
 
-The host supplies speech-to-text through `ISttService` and, for semantic matching, a probability through `ISystemOneService`. The sample implements both using Intra's STT gateway protocols. Completed processing returns the recorded video bytes and automatically captured PCM audio in `CameraSpeechMatchResult`. The host's transcription service selects the language; the sample service supports Persian and English.
+The host supplies speech-to-text through `ISttService` and, for semantic matching, a probability through `ISystemOneService`. The sample implements both locally through Ollama, using `frozenlab/qwen3-asr:0.6b` for transcription and `nimble:9b-q4_K_M` for semantic decisions. Completed processing returns the recorded video bytes and automatically captured PCM audio in `CameraSpeechMatchResult`. The host's transcription service selects the language; the local Sample uses automatic language detection.
 
 See the [project index](docs/AGENT.md) for the source map, execution flow, integration boundaries, and current implementation gaps.
 
@@ -39,43 +39,21 @@ Face detection runs locally in a Web Worker using bundled MediaPipe assets. Thes
 - Browser support for `getUserMedia`, `MediaRecorder` with WebM or MP4, Web Workers, `createImageBitmap`, `OffscreenCanvas`, and WebAssembly.
 - A working host implementation of `ISttService` and a registered `ISystemOneService`. Both interfaces are constructor dependencies, including in Lexical mode.
 - Browser support for `AudioContext` and `AudioWorkletNode` to capture PCM audio alongside every video recording.
-- The sample needs access to its configured STT gateway.
+- The sample needs local Ollama and both configured models; see the [Sample setup](src/CameraSpeechMatch.Sample/README.md). No Docker or API keys are required.
 
 The library targets `net10.0`, references `Microsoft.AspNetCore.Components.Web` 10.0.11, and references MudBlazor using the floating version `8.*`. There is no npm build step; JavaScript and MediaPipe assets are included under the library's `wwwroot`.
 
 ## Run the sample
 
-The sample registers [SttService](src/CameraSpeechMatch.Sample/Services/Stt/SttService.cs) and [SystemOneService](src/CameraSpeechMatch.Sample/Services/SystemOne/SystemOneService.cs). `SttService` handles the WebSocket protocol directly in one class and reads its language from `SpeechInput:Language`, set to `en` for the sample's initial English prompt. No FFmpeg or file-upload transcription endpoint is needed.
+The Sample uses the host's installed Ollama server and models. From the repository root:
 
-Configuration lives in [appsettings.json](src/CameraSpeechMatch.Sample/appsettings.json). The default gateway matches Intra: `https://ai-stt-gateway.airparsiana.com`. Override it in `appsettings.Development.json` or with `SttGateway__BaseUrl` to use another compatible gateway. Service credentials, if required by a different deployment, should remain server-side; this implementation follows Intra's client, which does not add an authentication header.
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `SttGateway:BaseUrl` | Intra gateway URL | Shared destination for STT and SystemOne; use HTTP(S) to support both. Path prefixes are preserved. |
-| `SttGateway:ConnectTimeoutSeconds` | `10` | STT WebSocket connection deadline. |
-| `SttGateway:MaximumEventBytes` | `65536` | Maximum assembled STT event size, including fragmented frames. |
-| `SpeechInput:Enabled` | `true` | Enable sample transcription. |
-| `SpeechInput:Language` | `en` | Sample transcription language: `fa` or `en`. Region suffixes such as `fa-IR` and `en-US` are accepted. |
-| `SpeechInput:ReadyTimeoutSeconds` | `15` | Wait for gateway readiness. |
-| `SpeechInput:FinalizationTimeoutSeconds` | `6` | Wait for completion after sending audio. |
-| `SpeechInput:MaximumSessionSeconds` | `300` | Overall transcription deadline, including connection and audio delivery. |
-| `SpeechInput:MaximumAudioBytes` | `10485760` | PCM byte limit, capped at 10 MiB. |
-| `SystemOne:Enabled` | `true` | Enable semantic comparison. |
-| `SystemOne:TimeoutSeconds` | `35` | HTTP deadline, including response-body reading. |
-| `SystemOne:MaxRequestBytes` | `65536` | Maximum serialized boolean request size. |
-| `SystemOne:MaxResponseBytes` | `262144` | Maximum boolean response size. |
-
-The sample sends captured PCM through `/api/stt/v1/stream` in 40 ms chunks at the recording's audio rate, matching Intra's live-stream transport. Transcription starts after recording, so processing takes approximately the recording duration plus gateway finalization. The sample's normal recording limit is 30 seconds. For longer recordings, increase `SpeechInput:MaximumSessionSeconds` (up to 600) to leave time for connection, audio delivery, and finalization; a recording near 300 seconds can exhaust the default budget.
-
-From the repository root:
-
-```bash
-dotnet restore CameraSpeechMatch.slnx
-dotnet build CameraSpeechMatch.slnx --configuration Release --no-restore
-dotnet run --project src/CameraSpeechMatch.Sample --configuration Release --no-build --launch-profile http
+```sh
+dotnet run --project src/CameraSpeechMatch.AppHost/CameraSpeechMatch.AppHost.csproj
 ```
 
-Open `http://localhost:5295`. The page lets you edit the prompt, select a match mode, and inspect the latest result and recorded playback. To test Persian, use Persian prompt text and set `SpeechInput:Language` to `fa` in configuration, or set the `SpeechInput__Language` environment variable.
+Open the local Aspire dashboard at `http://localhost:15295`, then the `sample` resource's endpoint. The local launch profile enables anonymous dashboard access, so no login token is required. Aspire 13.6.1 runs the Sample directly on the host and references existing Ollama at `http://localhost:11434`; it does not create containers or pull models. Startup checks both model names and required capabilities within a bounded deadline. The recorder becomes available after readiness succeeds.
+
+See the [Sample README](src/CameraSpeechMatch.Sample/README.md) for prerequisites, installation checks, configuration, exact model protocols, troubleshooting, stop instructions, and opt-in audio integration tests. The Sample uses only local Ollama models.
 
 ## Use the component
 
@@ -92,7 +70,7 @@ builder.Services.AddScoped<ISttService, YourSttService>();
 builder.Services.AddScoped<ISystemOneService, UnavailableSystemOneService>();
 ```
 
-`YourSttService` is your implementation of the [transcription contract](#speech-to-text). For Semantic or Combined mode, replace `UnavailableSystemOneService` with your working matcher. Choose service lifetimes to suit your provider implementation; the sample uses a singleton transcription service.
+`YourSttService` is your implementation of the [transcription contract](#speech-to-text). For Semantic or Combined mode, replace `UnavailableSystemOneService` with your working matcher. Choose service lifetimes to suit your provider implementation; the Sample uses typed HTTP clients.
 
 The repository does not define an `AddCameraSpeechMatch` registration extension. Register the interfaces directly.
 
@@ -144,7 +122,7 @@ public sealed class UnavailableSystemOneService : ISystemOneService
     public bool IsAvailable => false;
 
     public Task<double> MatchProbabilityAsync(
-        SystemOneMatchProbabilityRequest request,
+        MatchProbabilityRequest request,
         CancellationToken cancellationToken) =>
         Task.FromException<double>(
             new InvalidOperationException("Semantic matching is not configured."));
@@ -161,21 +139,21 @@ Implement [ISttService](src/CameraSpeechMatch/ISttService.cs):
 
 ```csharp
 Task<string> TranscribeAsync(
-    SttTranscribeRequest request,
+    TranscribeRequest request,
     CancellationToken cancellationToken);
 ```
 
-Set `IsAvailable` according to whether your service is configured. The component passes a [SttTranscribeRequest](src/CameraSpeechMatch/SttTranscribeRequest.cs) with:
+Set `IsAvailable` according to whether your service is configured. The component passes a [TranscribeRequest](src/CameraSpeechMatch/TranscribeRequest.cs) with:
 
 | Property | Value supplied by the component |
 | --- | --- |
 | `PcmAudioContent` | Raw mono 16 kHz signed PCM16 little-endian bytes, captured automatically alongside the video. |
 
-The sample STT service requires `PcmAudioContent`. It waits for `ready`, delivers audio while reading events concurrently, sends `complete`, and returns accumulated final transcript fragments only after `completed`. Interim captions do not determine the result.
+The local Sample requires `PcmAudioContent`, wraps bounded windows in WAV headers in memory, sends audio through the ASR model's documented Ollama interface, and returns final transcript text. No audio-conversion executable is required.
 
 The transcription request contains only automatically captured PCM audio. Your service selects the transcription language through its own configuration or provider language detection. The component's recording flow is independent of language. Recorded video and PCM audio are returned in `CameraSpeechMatchResult`.
 
-Return the recognized text and honor cancellation. The component trims the returned text and fails the attempt if it is empty. The sample's `SttService` connects directly to the external STT gateway.
+Return the recognized text and honor cancellation. The component trims the returned text and fails the attempt if it is empty. The default Sample calls only its configured local Ollama server.
 
 ### Semantic matcher
 
@@ -183,15 +161,27 @@ Implement [ISystemOneService](src/CameraSpeechMatch/ISystemOneService.cs) and re
 
 ```csharp
 Task<double> MatchProbabilityAsync(
-    SystemOneMatchProbabilityRequest request,
+    MatchProbabilityRequest request,
     CancellationToken cancellationToken);
 ```
 
-The [request](src/CameraSpeechMatch/SystemOneMatchProbabilityRequest.cs) includes `ExpectedText`, `Transcript`, `Task`, `Rules`, `TrueCriterion`, and `FalseCriterion`. The component supplies instructions to allow paraphrasing while preserving essential facts, names, identifiers, numbers, dates, and affirmation or negation. It also asks the matcher to treat both texts as comparison data.
+The [request](src/CameraSpeechMatch/MatchProbabilityRequest.cs) represents one System One `noul` decision: `State`, `Instructions`, and optional string properties `TrueCriteria` and `FalseCriteria`. State and instructions accept a nonblank string or a JSON-serializable object or array. A null criterion uses the model's default for that outcome. The adapter maps these typed properties to the standard `criteria.true` and `criteria.false` fields. See the [Ollama API reference](https://docs.ollama.com/api/systemone).
+
+```csharp
+var request = new MatchProbabilityRequest
+{
+    State = new { expectedText = "I approve payment of 100 dollars.", transcript = "I approve payment of 100 dollars." },
+    Instructions = "Does transcript preserve the meaning and every essential fact of expectedText?",
+    TrueCriteria = "Equivalent meaning and facts.",
+    FalseCriteria = "Different meaning, changed or missing facts, or insufficient evidence."
+};
+```
+
+The component builds the phrase data and comparison guidance before calling the service. Its instructions allow paraphrasing while preserving essential facts, names, identifiers, numbers, dates, and affirmation or negation, and require treating both phrases as data. It rejects empty transcriptions before calling the matcher. The Ollama adapter preserves state, instructions, and criterion descriptions, wrapping them in one `questions.match` entry with `type: "noul"` and mapping the typed criteria to their wire fields; model selection stays in configuration.
 
 Return a finite probability in `[0, 1]`. Invalid probabilities and handled provider errors fail processing. The component multiplies the probability by 100 to obtain `SemanticSimilarityPercent`. The semantic minimum passes when that percentage is greater than or equal to `MinimumSemanticSimilarityPercent`.
 
-The sample posts to `/api/system-one/v1/boolean` using Intra's contract: `state` contains the transcript, `instructions` contains the task/prompt/rules, and `criteria` contains true/false guidance. It requires HTTP 200, strict valid JSON, a finite probability in `[0, 1]`, and valid token-usage metadata. Logging records sizes, timings, and usage rather than recording content or comparison text.
+The local Sample posts structured phrase data and a typed `noul` question to Ollama's `/v1/systemone` endpoint. It validates the returned probability and rejects uncertain decisions before applying the component's acceptance threshold. See the [Sample README](src/CameraSpeechMatch.Sample/README.md) for the protocol and confidence settings.
 
 ## Matching behavior
 
@@ -273,8 +263,8 @@ If semantic processing fails after transcription, video and audio metadata can r
 | Camera or microphone cannot start | Check permissions, a secure context, device availability, and browser recording support. |
 | Face detection is unavailable | Check Worker/OffscreenCanvas/WASM support and loading of the library's MediaPipe assets. |
 | Face validation fails | Keep the full detected face inside the visible preview, keep the tab visible, and maintain fresh detections through recording end. |
-| Transcript is empty or inaccurate | Check the provider's media support and language configuration. The sample uses `SpeechInput:Language`. |
-| Sample transcription times out | Check gateway connectivity and readiness/completion messages. Include audio delivery time in the overall transcription budget. |
+| Transcript is empty or inaccurate | Check the provider's media support and microphone input. The local Sample uses automatic language detection. |
+| Sample transcription times out | Check local Ollama connectivity, `/health`, model availability, and configured inference deadlines. |
 | Component appears without its styles | Include MudBlazor assets and the host's generated scoped stylesheet. |
 | Build reports locked sample DLLs | Stop the running sample before rebuilding the same configuration, or build another configuration. |
 
@@ -287,7 +277,9 @@ dotnet build CameraSpeechMatch.slnx --configuration Release
 dotnet test CameraSpeechMatch.slnx --configuration Release
 ```
 
-.NET tests cover STT protocol ordering/limits/deadlines, actual loopback WebSocket framing, SystemOne mapping/validation, and component acceptance/mismatch/failure behavior. Matching checks cover inclusive minimums, Combined short-circuiting, result flags, rejected-recording playback, provider availability/errors/cancellation, and sample mode controls.
+.NET tests cover Ollama WAV audio construction/windowing, strict ASR/Jev parsing, limits/deadlines/cancellation, uncertain decisions, bounded startup, configuration/DI, and component acceptance/mismatch/failure behavior. Component checks cover inclusive minimums, Combined short-circuiting, result flags, rejected-recording playback, provider availability/errors, readiness, and sample mode controls.
+
+Real model inference and Aspire process orchestration have separate opt-in tests; see the [Sample README](src/CameraSpeechMatch.Sample/README.md#tests).
 
 MediaPipe assets are bundled in [wwwroot/vendor/mediapipe/1.0.1](src/CameraSpeechMatch/wwwroot/vendor/mediapipe/1.0.1). Their [manifest](src/CameraSpeechMatch/wwwroot/vendor/mediapipe/1.0.1/asset-manifest.json) records versions, source locations, sizes, and SHA-256 hashes; the included [license](src/CameraSpeechMatch/wwwroot/vendor/mediapipe/1.0.1/LICENSE) identifies Apache-2.0. The library maps `.task` assets to `application/octet-stream`.
 

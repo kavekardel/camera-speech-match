@@ -16,5 +16,5 @@ public interface ISttService
     /// <param name="request">Recorded PCM audio.</param>
     /// <param name="cancellationToken">Cancels transcription.</param>
     /// <returns>The recognized transcript. Return an empty string when no speech was recognized.</returns>
-    Task<string> TranscribeAsync(SttTranscribeRequest request, CancellationToken cancellationToken);
+    Task<string> TranscribeAsync(TranscribeRequest request, CancellationToken cancellationToken);
 }

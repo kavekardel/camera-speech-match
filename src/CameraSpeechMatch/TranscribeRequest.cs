@@ -1,7 +1,7 @@
 namespace CameraSpeechMatch;
 
 /// <summary>Audio passed to <see cref="ISttService.TranscribeAsync"/>.</summary>
-public sealed class SttTranscribeRequest
+public sealed class TranscribeRequest
 {
     /// <summary>
     /// Raw mono, 16 kHz, signed 16-bit little-endian PCM audio captured alongside the video.

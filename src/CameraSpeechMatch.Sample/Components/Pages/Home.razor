@@ -1,4 +1,7 @@
-﻿@page "/"
+@page "/"
+
+@inject CameraSpeechMatchSample.Services.Ollama.OllamaReadiness LocalAi
+@implements IDisposable
 
 <PageTitle>Camera speech match</PageTitle>
 
@@ -45,14 +48,21 @@
         </MudGrid>
     </MudPaper>
 
-    <CameraSpeechMatch ExpectedText="@ExpectedText"
-                       MatchMode="@MatchMode"
-                       MinimumLexicalSimilarityPercent="@MinimumLexicalSimilarityPercent"
-                       MinimumSemanticSimilarityPercent="@MinimumSemanticSimilarityPercent"
-                       MaxRecordingSeconds="30"
-                       OnResult="HandleVerificationResult"
-                       OnReset="ClearVerificationResult"
-                       ShowResultDetails="true" />
+    @if (!LocalAi.IsReady)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4">@LocalAi.Status</MudAlert>
+    }
+    else
+    {
+        <CameraSpeechMatch ExpectedText="@ExpectedText"
+                           MatchMode="@MatchMode"
+                           MinimumLexicalSimilarityPercent="@MinimumLexicalSimilarityPercent"
+                           MinimumSemanticSimilarityPercent="@MinimumSemanticSimilarityPercent"
+                           MaxRecordingSeconds="30"
+                           OnResult="HandleVerificationResult"
+                           OnReset="ClearVerificationResult"
+                           ShowResultDetails="true" />
+    }
 
     @if (VerificationResult is { } result)
     {
@@ -96,6 +106,10 @@
 </MudContainer>
 
 @code {
+    protected override void OnInitialized() => LocalAi.Changed += RefreshReadiness;
+    private void RefreshReadiness() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => LocalAi.Changed -= RefreshReadiness;
+
     private string ExpectedText { get; set; } = "This is a sample text for testing.";
     private CameraSpeechMatchMode MatchMode { get; set; } = CameraSpeechMatchMode.Lexical;
     private double MinimumLexicalSimilarityPercent { get; set; } = 100;

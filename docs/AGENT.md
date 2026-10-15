@@ -6,7 +6,7 @@ Source analysis and implementation notes updated on 2026-10-15. This index cover
 
 | Path | Role |
 | --- | --- |
-| [CameraSpeechMatch.slnx](../CameraSpeechMatch.slnx) | Solution containing the Razor library, sample host, and .NET tests. |
+| [CameraSpeechMatch.slnx](../CameraSpeechMatch.slnx) | Solution containing the Razor library, local Sample host, Aspire AppHost, and .NET tests. |
 | [src/CameraSpeechMatch/CameraSpeechMatch.csproj](../src/CameraSpeechMatch/CameraSpeechMatch.csproj) | `net10.0` Razor class library; Components.Web 10.0.11, MudBlazor `8.*`, and `.task` static-asset content type. |
 | [src/CameraSpeechMatch.Sample/CameraSpeechMatch.Sample.csproj](../src/CameraSpeechMatch.Sample/CameraSpeechMatch.Sample.csproj) | `net10.0` ASP.NET Core host with a project reference to the library and MudBlazor `8.*`. Its root namespace is `CameraSpeechMatchSample`. |
 | [.gitignore](../.gitignore) | .NET/Visual Studio build outputs and local tooling exclusions. |
@@ -28,13 +28,32 @@ camera-speech-match/
     │       └── background.png
     └── CameraSpeechMatch.Sample/
         ├── Program.cs
-        ├── Configuration/          STT and SystemOne settings
-        ├── Services/               gateway adapters and protocol helpers
+        ├── Configuration/          local Ollama settings
+        ├── Services/Ollama/         local model adapters and readiness
         ├── Components/             app shell, routing, layout, pages
         ├── Properties/launchSettings.json
         ├── appsettings*.json
         └── wwwroot/app.css
 ```
+
+## Local Ollama and Aspire execution
+
+The Sample runs entirely through the host's existing Ollama. See [Sample setup](../src/CameraSpeechMatch.Sample/README.md) for commands and configuration. The Sample contains only Ollama adapters and settings. The reusable library uses `TranscribeRequest` and `MatchProbabilityRequest` for its service contracts; browser recording contracts are unchanged.
+
+| Source | Responsibility |
+| --- | --- |
+| `src/CameraSpeechMatch.Sample/Configuration/OllamaSettings.cs` | Validated centralized model names, endpoint, deadlines, size bounds, and decision certainty. |
+| `src/CameraSpeechMatch.Sample/Services/Ollama/OllamaClient.cs` | Typed HTTP client, bounded strict JSON, HTTP errors, cancellation, and body-inclusive deadlines. |
+| `src/CameraSpeechMatch.Sample/Services/Ollama/OllamaSttService.cs` | Existing ISttService; raw PCM to in-memory WAV, 30-second windows, actual audio in chat images, ASR marker parsing. |
+| `src/CameraSpeechMatch.Sample/Services/Ollama/OllamaSystemOneService.cs` | Existing ISystemOneService; structured Jev noul question and strict/uncertainty validation. |
+| `src/CameraSpeechMatch.Sample/Services/Ollama/OllamaReadiness.cs` | Bounded background startup checks for version, exact installed names, audio/decision capabilities; shared UI/health status. |
+| `src/CameraSpeechMatch.Sample/Services/Ollama/OllamaServiceCollectionExtensions.cs` | Local DI, configuration validation, and Aspire external-service endpoint resolution. |
+| `src/CameraSpeechMatch.AppHost/` | Aspire 13.6.1 AppHost: external host Ollama and Sample project, with service reference and health checks. No containers or model downloads. |
+| `tests/CameraSpeechMatch.Tests/OllamaServiceTests.cs` | Offline protocol, audio, limits, errors, cancellation/deadlines, readiness, DI, and configuration tests. |
+| `tests/CameraSpeechMatch.Tests/OllamaIntegrationTests.cs` | Opt-in exact-model readiness, typed semantic checks, and real audio-to-text-to-decision test. |
+| `tests/CameraSpeechMatch.AppHost.Tests/` | Opt-in real AppHost/Sample startup and service discovery against an ephemeral local Ollama protocol double. |
+
+Default data flow: browser face validation and PCM capture -> existing component -> OllamaSttService -> Ollama `/api/chat` with WAV audio -> lexical comparison and/or OllamaSystemOneService -> `/v1/systemone` -> existing result contract. The AppHost manages only the Sample and references host Ollama. Startup readiness does not imply a model has successfully completed inference; run the opt-in integration tests to verify actual model execution.
 
 ## Library source map
 
@@ -47,9 +66,9 @@ camera-speech-match/
 | [CameraSpeechMatchMode.cs](../src/CameraSpeechMatch/CameraSpeechMatchMode.cs) | Public `Lexical`, `Semantic`, and `Combined` match modes, preserving enum values 0 and 1 for existing modes. |
 | [CameraSpeechMatchResult.cs](../src/CameraSpeechMatch/CameraSpeechMatchResult.cs) | Processing status (`Succeeded`), acceptance (`IsAccepted`), lexical/semantic scores and active minimums, text, media bytes/metadata, and errors. Combined captures both minimums; its semantic score is null when the lexical minimum fails. Completed mismatches retain media. Audio uses the video's base file name with `.pcm` and media type `application/octet-stream`. Successful results reuse the PCM bytes passed to STT. |
 | [ISttService.cs](../src/CameraSpeechMatch/ISttService.cs) | Host transcription boundary: `IsAvailable` and `TranscribeAsync`. The implementation owns language selection. |
-| [SttTranscribeRequest.cs](../src/CameraSpeechMatch/SttTranscribeRequest.cs) | Automatically captured `PcmAudioContent`. PCM is fixed at mono 16 kHz signed 16-bit little-endian. Recorded video is supplied only on the result. |
+| [TranscribeRequest.cs](../src/CameraSpeechMatch/TranscribeRequest.cs) | Automatically captured `PcmAudioContent`. PCM is fixed at mono 16 kHz signed 16-bit little-endian. Recorded video is supplied only on the result. |
 | [ISystemOneService.cs](../src/CameraSpeechMatch/ISystemOneService.cs) | Host semantic boundary: `IsAvailable` and `MatchProbabilityAsync`. |
-| [SystemOneMatchProbabilityRequest.cs](../src/CameraSpeechMatch/SystemOneMatchProbabilityRequest.cs) | Comparison texts and structured task/rules/acceptance criteria passed to the semantic provider. |
+| [MatchProbabilityRequest.cs](../src/CameraSpeechMatch/MatchProbabilityRequest.cs) | One noul decision: `State`, `Instructions` (text/object/array), and optional string properties `TrueCriteria`/`FalseCriteria`. |
 | [SpeechTranscriptComparer.cs](../src/CameraSpeechMatch/SpeechTranscriptComparer.cs) | Public `SpeechTranscriptComparer.Compare` and `SpeechTranscriptComparison` record. Normalizes wording, checks equality, and calculates Levenshtein similarity. |
 
 ## Browser modules
@@ -69,10 +88,10 @@ The component imports `./_content/CameraSpeechMatch/js/camera-speech-match.js` a
 
 | File | Responsibility |
 | --- | --- |
-| [Program.cs](../src/CameraSpeechMatch.Sample/Program.cs) | Registers Interactive Server, MudBlazor, gateway settings, the singleton STT service, and the typed HTTP SystemOne service; maps the host endpoints/assets. |
-| [Configuration/GatewaySettings.cs](../src/CameraSpeechMatch.Sample/Configuration/GatewaySettings.cs) | `SttGateway`, `SpeechInput`, and `SystemOne` configuration defaults adapted from Intra. |
-| [Services/Stt/SttService.cs](../src/CameraSpeechMatch.Sample/Services/Stt/SttService.cs) | Implements `ISttService` directly with `ClientWebSocket`: language from `SpeechInput:Language`, fixed PCM configuration, readiness, audio delivery at recording rate, bounded fragmented events, final transcript accumulation, completion/deadlines, and socket cleanup. |
-| [Services/SystemOne/SystemOneService.cs](../src/CameraSpeechMatch.Sample/Services/SystemOne/SystemOneService.cs) | Implements `ISystemOneService` through Intra's boolean endpoint. Maps instructions/criteria and validates probability, usage, HTTP status, strict JSON, and byte limits. |
+| [Program.cs](../src/CameraSpeechMatch.Sample/Program.cs) | Registers Interactive Server, MudBlazor, AddLocalOllama, and health/liveness endpoints; maps host assets and components. |
+| [Configuration/OllamaSettings.cs](../src/CameraSpeechMatch.Sample/Configuration/OllamaSettings.cs) | Centralized local model names, endpoint, readiness, inference deadlines, confidence, and byte limits. |
+| [Services/Ollama/OllamaSttService.cs](../src/CameraSpeechMatch.Sample/Services/Ollama/OllamaSttService.cs) | Implements `ISttService` with in-memory WAV audio sent to the local ASR model. |
+| [Services/Ollama/OllamaSystemOneService.cs](../src/CameraSpeechMatch.Sample/Services/Ollama/OllamaSystemOneService.cs) | Implements `ISystemOneService` using local Nimble typed decisions with strict validation and uncertainty rejection. |
 | [Components/App.razor](../src/CameraSpeechMatch.Sample/Components/App.razor) | HTML shell, static stylesheet references, import map, interactive head/routes, MudBlazor script, and Blazor bootstrap. |
 | [Components/Routes.razor](../src/CameraSpeechMatch.Sample/Components/Routes.razor) | Router, main layout, focus handling, and not-found page. |
 | [Components/_Imports.razor](../src/CameraSpeechMatch.Sample/Components/_Imports.razor) | Host, library, render-mode, and MudBlazor imports. |
@@ -86,7 +105,7 @@ The component imports `./_content/CameraSpeechMatch/js/camera-speech-match.js` a
 | [Components/Layout/ReconnectModal.razor.css](../src/CameraSpeechMatch.Sample/Components/Layout/ReconnectModal.razor.css) | Reconnection dialog styling and animation. |
 | [wwwroot/app.css](../src/CameraSpeechMatch.Sample/wwwroot/app.css) | Host typography, body, and validation/error styling. |
 | [Properties/launchSettings.json](../src/CameraSpeechMatch.Sample/Properties/launchSettings.json) | `http` launch profile, Development environment, and `http://localhost:5295`. |
-| [appsettings.json](../src/CameraSpeechMatch.Sample/appsettings.json) | Logging, allowed hosts, gateway address, service enablement, and deadlines/limits. |
+| [appsettings.json](../src/CameraSpeechMatch.Sample/appsettings.json) | Logging, allowed hosts, local Ollama model names, endpoint, readiness, deadlines, confidence, and byte limits. |
 | [appsettings.Development.json](../src/CameraSpeechMatch.Sample/appsettings.Development.json) | Development logging defaults. |
 
 ## Execution and data flow
@@ -116,9 +135,7 @@ The component's private states are `NotStarted`, `Ready`, `Recording`, `Processi
 
 Both completion callbacks validate face status, prompt/mode settings, media type, and sizes before reading any bytes. Video is limited to 100 MiB; PCM to 10 MiB with complete 16-bit samples. PCM is captured automatically for every recording, and missing audio fails validation. The shared completion logic calls STT, rejects empty text, calculates lexical similarity, and optionally calls SystemOne. Both scores and minimums use 0–100 percentages. Lexical mode uses `MinimumLexicalSimilarityPercent` (default 100); Semantic mode uses `MinimumSemanticSimilarityPercent` (default 80). Combined requires both inclusive minimums, skipping SystemOne when lexical similarity fails. Semantic and Combined modes require an available matcher before recording. The provider returns a 0–1 probability, validated before conversion to percent. `IsAccepted` drives the UI; completed mismatches retain media with `Succeeded = true`. Successful results include the same `PcmAudioContent` sent to STT. `CompleteFailureAsync` sets both flags false, clears both video and PCM content, and publishes the error. Completion callbacks return processing completion so rejected recordings remain playable.
 
-The sample follows Intra's PCM WebSocket gateway rather than a file-upload API. Audio is captured locally during recording, then delivered after recording at 32,000 bytes/second in roughly 40 ms chunks while responses are read concurrently. This pacing prevents buffered audio from overrunning the gateway's finalization window. Finalization begins after the last audio chunk; the overall transcription deadline includes connection, readiness, delivery, and completion.
-
-The SystemOne adapter posts `state`, structured `instructions`, and true/false `criteria` to `api/system-one/v1/boolean`. It exposes only the probability needed by the library; choice/score operations and the Intra project itself are not dependencies.
+The Sample wraps captured PCM in an in-memory WAV header and sends it to Ollama's `/api/chat` audio interface in consecutive windows of at most 30 seconds. It extracts transcription text after the ASR marker. The component builds a `MatchProbabilityRequest` containing structured expected/transcribed phrases in `State`, comparison guidance in `Instructions`, and typed `TrueCriteria`/`FalseCriteria` descriptions. The adapter preserves the content, maps the criteria to the standard true/false JSON fields, and sends one typed `noul` question to `/v1/systemone`, validates the probability, and rejects uncertain decisions. The shared HTTP client bounds response sizes and honors inference deadlines and cancellation.
 
 Attempt version checks, completion guards, and cancellation tokens prevent stale work from publishing into a newer attempt. JavaScript separately tracks attempt IDs and releases camera tracks, workers, recording chunks, timers, sockets, and object URLs on reset/disposal. Page navigation has immediate browser-side cleanup.
 
@@ -126,8 +143,8 @@ Attempt version checks, completion guards, and cancellation tokens prevent stale
 
 | Boundary | Supplied here | Host responsibility |
 | --- | --- | --- |
-| Transcription | Public interface/request, automatic PCM capture, and sample gateway implementation | Configure a compatible gateway or supply another provider, including its language selection. The request contains only PCM. |
-| Semantic comparison | Public interface/request, probability validation, and sample boolean adapter | Configure the gateway or supply another provider returning a finite probability in `[0, 1]`. |
+| Transcription | Public interface/request, automatic PCM capture, and local Ollama adapter | Configure local Ollama for the Sample. Custom hosts supply their own implementation, including language selection. The request contains only PCM. |
+| Semantic comparison | Public interface/request, probability validation, and local Ollama decision adapter | Configure local Ollama for the Sample. Custom hosts supply their own implementation returning a finite probability in `[0, 1]`. |
 | Media retention | Recording bytes and metadata in `OnResult` | Persistence, upload, and any host playback UI. |
 | Rendering | Razor/MudBlazor component and static assets | Interactive rendering, service registration, MudBlazor assets/providers, and generated scoped CSS. |
 
@@ -148,7 +165,7 @@ The model and both WASM binaries match their manifest sizes and hashes. In the s
 
 | Finding | Impact / next change location |
 | --- | --- |
-| Post-recording STT uses a real-time gateway | Processing takes approximately the recording duration plus finalization. The default overall deadline is 300 seconds; recordings near that duration can exhaust the budget. |
+| Long recordings use separate ASR windows | Window boundaries can reduce recognition accuracy. Prefer short verification phrases; the total transcription deadline covers all windows. |
 | PCM capture requires AudioWorklet support | Every recording captures PCM automatically. Unsupported browsers fail before recording starts. |
 | Face-position settings are advisory | Acceptance checks full detected-face visibility and timestamp freshness, independently of center/size guidance. Change `evaluateFaceVisibility` and recording validation if acceptance requirements change. |
 | Worker requests one detected face | There is no explicit multiple-face rejection, identity comparison, or liveness check. Face checks should be understood within this scope. |
@@ -165,29 +182,27 @@ The model and both WASM binaries match their manifest sizes and hashes. In the s
 | Component parameters, result fields, size limit, or error mapping | `CameraSpeechMatch.razor.cs` and `CameraSpeechMatchResult.cs`. |
 | Lexical normalization or similarity calculation | `SpeechTranscriptComparer.cs`. |
 | Match minima, Combined short-circuiting, acceptance, validation, or semantic criteria | `CompleteTranscriptionAsync`, `GetMatchConfigurationError`, and `CreateSemanticMatchRequest` in `CameraSpeechMatch.razor.cs`. |
-| Provider integration | Sample gateway adapters and `Program.cs`; custom hosts can implement the same public interfaces. |
+| Provider integration | Sample Ollama adapters and `AddLocalOllama`; custom hosts can implement the same public interfaces. |
 | PCM recording format/lifecycle | `pcm-recording.js`, controlled worklet mode, and shared component completion logic. |
 | Recording codecs, timers, playback, or browser cleanup | `camera-speech-match.js`. |
 | Face cropping, guidance, freshness, or end-of-recording checks | `camera-speech-face.js`; worker inference settings are in `camera-speech-face-worker.js`. |
 | Caption protocol, PCM format, or timeouts | `speech-session.js` and `speech-input-worklet.js`. |
 | MediaPipe update | Versioned vendor directory, asset manifest, worker loader, and asset root in `camera-speech-face.js`. |
 
-## Verification performed
+## Local verification
 
-- Release build passed with .NET SDK 10.0.400, zero warnings, and zero errors.
-- 119 xUnit/bUnit tests passed, covering STT sequencing/pacing/deadlines/errors against a loopback WebSocket server, fragmented frames, SystemOne strict HTTP/JSON contracts, inclusive match minimums, Combined short-circuiting, acceptance flags/display, sample mode controls, stream validation, retained rejected-recording playback, provider availability/errors, and cancellation.
-- Earlier verification passed 11 Node.js browser-module tests with Node 24.21.0, covering conversion, capture boundaries/tail flushing, limits, retry, freshness rechecks, face rejection, caption-independent playback, and navigation cleanup. That test file is absent from the current checkout.
-- The configured gateway recognized synthetic English PCM as “This is a sample text for testing.” Lexical matching returned 100% similarity. SystemOne returned 0.96 for that match and 0.01 for a mismatching statement.
-- The sample returned HTTP 200 and rendered interactively in Chromium. Its gateway services resolve without provider calls during page rendering.
-- Chromium integration with synthetic camera/audio and deterministic face bounds exercised the real AudioWorklet, MediaRecorder, Blazor byte transfer, and configured gateways. Lexical and Semantic matches succeeded; the semantic match returned 0.96 and a mismatch returned 0.01 with `Succeeded == true`. Caption-independent recorded playback advanced successfully, and retry cleared the old result.
-- The earlier bundled-asset hash check remains applicable: model/WASM bytes match directly; vendor text matches after LF normalization.
-- Local documentation links/heading anchors resolve, and all 13 component parameters have README table entries.
+- Release solution build passed with .NET SDK 10.0.400, zero warnings, and zero errors.
+- On 2026-10-15, all three opt-in Ollama integration tests passed against Ollama 0.40.4 and the exact configured models. They covered model availability/capabilities, matching with changed amounts and negation, and synthetic mono 16 kHz WAV audio through transcription and semantic decision.
+- The opt-in Aspire integration test passed with the real AppHost/Sample and an ephemeral local Ollama protocol double, verifying service reference propagation, readiness, liveness, and page connectivity.
+- The AppHost also ran against the installed local models; the managed Sample's page, `/alive`, and `/health` returned HTTP 200.
+- Webcam and real face detection were not repeated after the local model migration.
 
 ## Tests and commands
 
 | Path | Coverage |
 | --- | --- |
-| [tests/CameraSpeechMatch.Tests](../tests/CameraSpeechMatch.Tests/) | xUnit/bUnit service, WebSocket transport, and component tests. |
+| [tests/CameraSpeechMatch.Tests](../tests/CameraSpeechMatch.Tests/) | xUnit/bUnit Ollama protocol, readiness, configuration, component tests, and opt-in live model tests. |
+| [tests/CameraSpeechMatch.AppHost.Tests](../tests/CameraSpeechMatch.AppHost.Tests/) | Opt-in AppHost/Sample process orchestration and service connectivity test. |
 
 ```bash
 dotnet build CameraSpeechMatch.slnx --configuration Release

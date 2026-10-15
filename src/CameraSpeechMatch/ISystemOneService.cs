@@ -1,13 +1,13 @@
 namespace CameraSpeechMatch;
 
 /// <summary>
-/// Decides whether a transcript has the same meaning as the expected prompt.
+/// Evaluates a System One noul question about the supplied state.
 /// The host application implements this interface.
 /// </summary>
 public interface ISystemOneService
 {
     bool IsAvailable { get; }
 
-    /// <summary>Returns a probability from 0 to 1 that the transcript matches the prompt.</summary>
-    Task<double> MatchProbabilityAsync(SystemOneMatchProbabilityRequest request, CancellationToken cancellationToken);
+    /// <summary>Returns the probability of true, from 0 to 1, for the request's instructions and criteria.</summary>
+    Task<double> MatchProbabilityAsync(MatchProbabilityRequest request, CancellationToken cancellationToken);
 }
