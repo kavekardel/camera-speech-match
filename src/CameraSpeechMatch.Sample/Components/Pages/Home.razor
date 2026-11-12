@@ -1,6 +1,6 @@
 @page "/"
 
-@inject CameraSpeechMatchSample.Services.Ollama.OllamaReadiness LocalAi
+@inject CameraSpeechMatchAiReadiness Ai
 @implements IDisposable
 
 <PageTitle>Camera speech match</PageTitle>
@@ -42,15 +42,15 @@
                                      Min="0"
                                      Max="100"
                                      Step="1"
-                                     HelperText="Percentage from 0 to 100. Semantic and Combined modes need a registered matcher." />
+                                     HelperText="Percentage from 0 to 100. Semantic and Combined modes need a configured matching provider." />
                 </MudItem>
             }
         </MudGrid>
     </MudPaper>
 
-    @if (!LocalAi.IsReady)
+    @if (!Ai.IsReadyFor(MatchMode))
     {
-        <MudAlert Severity="Severity.Warning" Class="mb-4">@LocalAi.Status</MudAlert>
+        <MudAlert Severity="Severity.Warning" Class="mb-4">@Ai.GetStatus(MatchMode)</MudAlert>
     }
     else
     {
@@ -106,9 +106,9 @@
 </MudContainer>
 
 @code {
-    protected override void OnInitialized() => LocalAi.Changed += RefreshReadiness;
+    protected override void OnInitialized() => Ai.Changed += RefreshReadiness;
     private void RefreshReadiness() => _ = InvokeAsync(StateHasChanged);
-    public void Dispose() => LocalAi.Changed -= RefreshReadiness;
+    public void Dispose() => Ai.Changed -= RefreshReadiness;
 
     private string ExpectedText { get; set; } = "This is a sample text for testing.";
     private CameraSpeechMatchMode MatchMode { get; set; } = CameraSpeechMatchMode.Lexical;

@@ -3,8 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using CameraSpeechMatch;
-using CameraSpeechMatchSample.Configuration;
-using CameraSpeechMatchSample.Services.Ollama;
+using CameraSpeechMatch.AI.Ollama;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -331,51 +330,23 @@ public sealed class OllamaServiceTests
         await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(3));
         Assert.False(ready.IsReady);
         Assert.Contains("timed out", ready.Status);
-        Assert.Contains("offline", ready.Status);
+        Assert.Contains("Ollama request failed", ready.Status);
         Assert.False(new OllamaSttService(client, options, ready).IsAvailable);
         await Assert.ThrowsAsync<InvalidOperationException>(() => new OllamaSystemOneService(client, options, ready).MatchProbabilityAsync(Match(), default));
     }
 
-    [Fact]
-    public void Registration_UsesLocalProvidersAndAspireDiscoveryWithoutCredentials()
-    {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Ollama:BaseUrl"] = "http://ignored:11434", ["services:ollama:http:0"] = "http://localhost:12345/prefix/"
-        }).Build();
-        var services = new ServiceCollection().AddLogging();
-        services.AddLocalOllama(configuration);
-        using var provider = services.BuildServiceProvider();
-        Assert.IsType<OllamaSttService>(provider.GetRequiredService<ISttService>());
-        Assert.IsType<OllamaSystemOneService>(provider.GetRequiredService<ISystemOneService>());
-        Assert.Equal("http://localhost:12345/prefix/", provider.GetRequiredService<IOptions<OllamaSettings>>().Value.BaseUrl);
-        Assert.Equal("nimble:9b-q4_K_M", provider.GetRequiredService<IOptions<OllamaSettings>>().Value.MatchingModel);
-    }
-
-    [Theory]
-    [InlineData("Ollama:BaseUrl", "ftp://localhost")]
-    [InlineData("Ollama:MatchingModel", " ")]
-    [InlineData("Ollama:StartupTimeoutSeconds", "0")]
-    [InlineData("Ollama:MinimumDecisionProbability", "0.4")]
-    public void Registration_ValidatesConfiguration(string key, string value)
-    {
-        var services = new ServiceCollection().AddLogging();
-        services.AddLocalOllama(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [key] = value }).Build());
-        using var provider = services.BuildServiceProvider();
-        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<OllamaSettings>>().Value);
-    }
-
     internal static TranscribeRequest Audio() => new() { PcmAudioContent = [1, 2] };
-    internal static async Task<OllamaReadiness> ReadyAsync()
+    internal static async Task<CameraSpeechMatchAiReadiness> ReadyAsync()
+    {
+        var readiness = new CameraSpeechMatchAiReadiness();
+        await MakeReadyAsync(readiness);
+        return readiness;
+    }
+    internal static async Task MakeReadyAsync(CameraSpeechMatchAiReadiness readiness)
     {
         using var setup = await Setup.CreateAsync((_, _) => throw new Exception("Unexpected inference"));
-        return setup.Readiness;
-    }
-    internal static async Task MakeReadyAsync(OllamaReadiness readiness)
-    {
-        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(Reply(Metadata(request)))))
-        { BaseAddress = new("http://localhost/") };
-        await readiness.CheckAsync(new(http, Options.Create(new OllamaSettings())), new(), default);
+        readiness.Set(true, new(true, setup.Readiness.IsReady, setup.Readiness.Status));
+        readiness.Set(false, new(true, setup.Readiness.IsReady, setup.Readiness.Status));
     }
     internal static MatchProbabilityRequest Match(string transcript = "Spoken phrase") => new()
     {

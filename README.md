@@ -2,7 +2,7 @@
 
 A .NET 10 Blazor component that records a person reading a prompt, checks face visibility in the camera preview, and compares a speech transcript with the prompt. The UI uses MudBlazor 8, and the repository includes a Blazor Interactive Server sample.
 
-The host supplies speech-to-text through `ISttService` and, for semantic matching, a probability through `ISystemOneService`. The sample implements both locally through Ollama, using `frozenlab/qwen3-asr:0.6b` for transcription and `nimble:9b-q4_K_M` for semantic decisions. Completed processing returns the recorded video bytes and automatically captured PCM audio in `CameraSpeechMatchResult`. The host's transcription service selects the language; the local Sample uses automatic language detection.
+The library includes speech-to-text and semantic matching providers. Consumers configure Ollama, OpenAI-compatible services, Jev, Cloudflare Clef, Deepgram, or ElevenLabs through one DI registration. The Sample defaults to local Ollama with `frozenlab/qwen3-asr:0.6b` for transcription and `nimble:9b-q4_K_M` for semantic decisions. Existing `ISttService` and `ISystemOneService` implementations remain supported as optional overrides. Completed processing returns video and automatically captured PCM audio in `CameraSpeechMatchResult`; transcription supports provider language settings and automatic detection.
 
 See the [project index](docs/AGENT.md) for the source map, execution flow, integration boundaries, and current implementation gaps.
 
@@ -26,7 +26,7 @@ See the [project index](docs/AGENT.md) for the source map, execution flow, integ
 3. The user reads the prompt and stops recording, or the configured duration expires.
 4. Face validation checks the recording interval and its end. A visibility loss or gap in fresh detections of one second or more fails the attempt. The face must also be visible at the end.
 5. The component transfers the recorded video and separately captured PCM audio to .NET and calls `ISttService.TranscribeAsync`. This service's transcript determines the match.
-6. Lexical mode checks normalized wording similarity. Semantic mode checks the probability from `ISystemOneService`, converted to a percentage. Combined mode requires both minimums and calls the semantic provider only after the lexical minimum passes.
+6. Lexical mode checks normalized wording similarity. Semantic mode checks the score from `ISystemOneService`, converted to a percentage. Combined mode requires both minimums and calls the semantic provider only after the lexical minimum passes.
 7. `OnResult` reports completed processing or an attempt failure. **Record again** clears the attempt and returns to the initial screen.
 
 Face detection runs locally in a Web Worker using bundled MediaPipe assets. These checks establish face visibility; the implementation does not perform identity recognition or liveness detection.
@@ -37,11 +37,11 @@ Face detection runs locally in a Web Worker using bundled MediaPipe assets. Thes
 - A camera, microphone, and browser permission to access them.
 - A secure browser context: use HTTPS when deployed. The sample uses `http://localhost:5295` for local development.
 - Browser support for `getUserMedia`, `MediaRecorder` with WebM or MP4, Web Workers, `createImageBitmap`, `OffscreenCanvas`, and WebAssembly.
-- A working host implementation of `ISttService` and a registered `ISystemOneService`. Both interfaces are constructor dependencies, including in Lexical mode.
+- Server-side AI provider registration with working transcription, plus matching for Semantic/Combined mode. Optional host service overrides remain supported.
 - Browser support for `AudioContext` and `AudioWorkletNode` to capture PCM audio alongside every video recording.
-- The sample needs local Ollama and both configured models; see the [Sample setup](src/CameraSpeechMatch.Sample/README.md). No Docker or API keys are required.
+- The default sample configuration needs local Ollama and both configured models; see the [Sample setup](src/CameraSpeechMatch.Sample/README.md). No Docker or API keys are required.
 
-The library targets `net10.0`, references `Microsoft.AspNetCore.Components.Web` 10.0.11, and references MudBlazor using the floating version `8.*`. There is no npm build step; JavaScript and MediaPipe assets are included under the library's `wwwroot`.
+The library targets `net10.0`, uses the ASP.NET Core shared framework, pins Microsoft.Extensions.AI packages at 10.11.0, and references MudBlazor using the floating version `8.*`. There is no npm build step; JavaScript and MediaPipe assets are included under the library's `wwwroot`.
 
 ## Run the sample
 
@@ -53,26 +53,71 @@ dotnet run --project src/CameraSpeechMatch.AppHost/CameraSpeechMatch.AppHost.csp
 
 Open the local Aspire dashboard at `http://localhost:15295`, then the `sample` resource's endpoint. The local launch profile enables anonymous dashboard access, so no login token is required. Aspire 13.6.1 runs the Sample directly on the host and references existing Ollama at `http://localhost:11434`; it does not create containers or pull models. Startup checks both model names and required capabilities within a bounded deadline. The recorder becomes available after readiness succeeds.
 
-See the [Sample README](src/CameraSpeechMatch.Sample/README.md) for prerequisites, installation checks, configuration, exact model protocols, troubleshooting, stop instructions, and opt-in audio integration tests. The Sample uses only local Ollama models.
+See the [Sample README](src/CameraSpeechMatch.Sample/README.md) for prerequisites, installation checks, configuration, exact model protocols, troubleshooting, stop instructions, and opt-in audio integration tests. The Sample defaults to local Ollama; provider configuration also supports cloud and mixed setups.
 
 ## Use the component
 
 Reference [CameraSpeechMatch.csproj](src/CameraSpeechMatch/CameraSpeechMatch.csproj) from your Blazor host and add `@using CameraSpeechMatch` to the host's `_Imports.razor`.
 
-Register MudBlazor and the two service implementations in the host's `Program.cs`:
+Register MudBlazor and the built-in AI services in the host's server-side `Program.cs`:
 
 ```csharp
 using CameraSpeechMatch;
 using MudBlazor.Services;
 
 builder.Services.AddMudServices();
-builder.Services.AddScoped<ISttService, YourSttService>();
-builder.Services.AddScoped<ISystemOneService, UnavailableSystemOneService>();
+builder.Services.AddCameraSpeechMatchAI(
+    builder.Configuration.GetSection(CameraSpeechMatchAiOptions.SectionName));
 ```
 
-`YourSttService` is your implementation of the [transcription contract](#speech-to-text). For Semantic or Combined mode, replace `UnavailableSystemOneService` with your working matcher. Choose service lifetimes to suit your provider implementation; the Sample uses typed HTTP clients.
+Both providers default to `None`. Configure only transcription for Lexical mode; Semantic and Combined modes also require matching. No custom interfaces or dummy matcher are required.
 
-The repository does not define an `AddCameraSpeechMatch` registration extension. Register the interfaces directly.
+### Built-in provider configuration
+
+Local Ollama configuration in `appsettings.json`:
+
+```json
+{
+  "CameraSpeechMatch": {
+    "AI": {
+      "Transcription": {
+        "Provider": "Ollama",
+        "Endpoint": "http://localhost:11434",
+        "Model": "frozenlab/qwen3-asr:0.6b"
+      },
+      "SemanticMatching": {
+        "Provider": "OllamaSystemOne",
+        "Endpoint": "http://localhost:11434",
+        "Model": "nimble:9b-q4_K_M"
+      }
+    }
+  }
+}
+```
+
+For cloud or self-hosted OpenAI-compatible services, change the relevant operation's `Provider` to `OpenAICompatible`, set `Endpoint` to its API base URL (including `/v1`), and select its `Model` explicitly. Transcription requires the audio transcription API; semantic matching requires Chat Completions with strict JSON Schema structured outputs. Chat compatibility alone does not establish either capability.
+
+Set each `ApiKey` through server-side configuration. For example, use environment variables `CameraSpeechMatch__AI__Transcription__ApiKey` and `CameraSpeechMatch__AI__SemanticMatching__ApiKey`, or user-secret keys `CameraSpeechMatch:AI:Transcription:ApiKey` and `CameraSpeechMatch:AI:SemanticMatching:ApiKey`. The official OpenAI endpoint requires a key; explicitly configured self-hosted endpoints may omit it, in which case no authorization header is sent. Keys never become component parameters or browser configuration.
+
+Providers can be mixed. The action overload is useful for composing configuration with host-specific overrides:
+
+```csharp
+builder.Services.AddCameraSpeechMatchAI(options =>
+{
+    options.Transcription.Provider = TranscriptionProvider.Ollama;
+    options.Transcription.Model = "frozenlab/qwen3-asr:0.6b";
+    options.SemanticMatching.Provider = SemanticMatchingProvider.OpenAICompatible;
+    options.SemanticMatching.Endpoint = "https://your-provider.example/v1";
+    options.SemanticMatching.Model = "your-structured-output-model";
+    options.SemanticMatching.ApiKey = builder.Configuration["MatchingApiKey"];
+});
+```
+
+Each operation supports `TimeoutSeconds` (default 120, range 1–600), `MaximumResponseBytes` (default 262144, range 1024–1048576), and Ollama readiness settings `StartupTimeoutSeconds` (60, range 1–300), `ProbeTimeoutSeconds` (5, range 1–30), and `RetryDelaySeconds` (2, range 1–30). Transcription supports `MaximumAudioBytes` (default/cap 10485760); matching supports `MaximumMatchingRequestBytes` (default/cap 65536, minimum 1024). Native System One providers (Ollama, Jev, and Cloudflare) support `MinimumDecisionProbability` (default 0.8, range 0.5–1); a 0.5 decision is always uncertain. Empty or malformed results fail processing. No automatic provider fallback or inference retry occurs.
+
+`CameraSpeechMatchAiReadiness` exposes per-operation status, `IsReadyFor(mode)`, `GetStatus(mode)`, and `Changed` notifications. Registration adds a `camera-speech-match-ai` health check: transcription must be ready, plus matching if configured. Ollama checks run in the background with a bounded startup budget; cloud readiness means configuration is valid and does not make paid inference calls. Actual inference can still fail. Custom service availability is sampled when the host starts.
+
+Built-in providers run on the server. The library pins Microsoft.Extensions.AI and its OpenAI adapter at 10.11.0; experimental speech APIs are isolated internally behind `ISttService`.
 
 For an Interactive Server host, enable `AddInteractiveServerComponents()` and `AddInteractiveServerRenderMode()`, map static assets, and render the page or routes interactively. Use the sample's [Program.cs](src/CameraSpeechMatch.Sample/Program.cs) and [App.razor](src/CameraSpeechMatch.Sample/Components/App.razor) as references. Include MudBlazor's stylesheet and script, and the host's generated `<HostAssembly>.styles.css` so the component's isolated styles load. The sample [layout](src/CameraSpeechMatch.Sample/Components/Layout/MainLayout.razor) also shows the MudBlazor providers.
 
@@ -110,32 +155,81 @@ Example page for a host configured with interactive routes:
 }
 ```
 
-### Lexical mode service registration
+### Jev, Cloudflare Clef, Deepgram, and ElevenLabs
 
-Create `UnavailableSystemOneService.cs` in the host project with this implementation when semantic matching is disabled:
+| Provider value | Operation | Example model | Default endpoint base |
+| --- | --- | --- | --- |
+| `Jev` | Semantic matching | `jev-1.14.0` | `https://api.typesafe.ai` |
+| `CloudflareClef` | Semantic matching | `clef-flash` or `clef` | `https://api.cloudflare.com/client/v4` |
+| `Deepgram` | Transcription | `nova-3` | `https://api.deepgram.com` |
+| `ElevenLabs` | Transcription | `scribe_v2` | `https://api.elevenlabs.io` |
 
-```csharp
-using CameraSpeechMatch;
+Each hosted provider requires an explicit `Model` and `ApiKey`. Cloudflare also requires `SemanticMatching.AccountId` from the Workers AI dashboard. The adapter builds the account-specific model URL. Its API token needs Workers AI permissions. [Cloudflare setup](https://developers.cloudflare.com/workers-ai/get-started/rest-api/)
 
-public sealed class UnavailableSystemOneService : ISystemOneService
+Jev with ElevenLabs can use this configuration:
+
+```json
 {
-    public bool IsAvailable => false;
-
-    public Task<double> MatchProbabilityAsync(
-        MatchProbabilityRequest request,
-        CancellationToken cancellationToken) =>
-        Task.FromException<double>(
-            new InvalidOperationException("Semantic matching is not configured."));
+  "CameraSpeechMatch": {
+    "AI": {
+      "Transcription": {
+        "Provider": "ElevenLabs",
+        "Model": "scribe_v2"
+      },
+      "SemanticMatching": {
+        "Provider": "Jev",
+        "Model": "jev-1.14.0"
+      }
+    }
+  }
 }
 ```
 
-Lexical mode does not call this matcher. Selecting Semantic or Combined mode with this registration produces an availability error before the camera starts.
+Supply `CameraSpeechMatch__AI__Transcription__ApiKey` with the ElevenLabs key and `CameraSpeechMatch__AI__SemanticMatching__ApiKey` with the TypeSafe key through your server's secret configuration. Jev uses its native typed Noul API. The example selects the published Jev 1.14 model version. [Jev API](https://docs.typesafe.ai/api/system-one), [Jev models](https://docs.typesafe.ai/models)
+
+To use Deepgram with the same Jev matcher, replace the transcription section with:
+
+```json
+{
+  "Provider": "Deepgram",
+  "Model": "nova-3",
+  "Language": "fa"
+}
+```
+
+`Transcription.Language` accepts a provider-supported code such as `fa` or `en`. Deepgram maps it to `language`, ElevenLabs to `language_code`, and OpenAI-compatible transcription to the SDK's language option. Omit it for automatic detection. Ollama ASR requires automatic detection and rejects an explicit `Language`.
+
+For Persian Deepgram recordings, set `Language` to `fa`. Nova-3 lists Persian support, while the documented automatic language detection list omits Persian. ElevenLabs lists Persian support and predicts the language automatically when `Language` is omitted. Both services receive mono 16 kHz PCM16 wrapped in WAV. ElevenLabs requests speech text with audio-event tagging, diarization, and webhooks disabled. [Deepgram models](https://developers.deepgram.com/docs/models-languages-overview), [Deepgram detection](https://developers.deepgram.com/docs/language-detection), [ElevenLabs languages](https://elevenlabs.io/docs/overview/capabilities/speech-to-text)
+
+For Cloudflare, replace the matching section with:
+
+```json
+{
+  "Provider": "CloudflareClef",
+  "Model": "clef-flash",
+  "AccountId": "0123456789abcdef0123456789abcdef"
+}
+```
+
+Replace the example account ID with your own and supply the Cloudflare API token through `SemanticMatching.ApiKey`. Jev and Cloudflare return native `noul` probabilities and apply `MinimumDecisionProbability` before the component applies its semantic acceptance minimum. Cloudflare requests have a conservative 16 KiB serialized JSON ceiling, or the configured `MaximumMatchingRequestBytes` if lower, to leave headroom for the model's context and decision template. Evaluate thresholds using representative English and Persian phrases for your selected model. [Cloudflare Clef Flash](https://developers.cloudflare.com/workers-ai/models/clef-flash/)
+
+The existing `OllamaSystemOne` provider can select installed decision models such as `nimble:9b-q4_K_M`, `clef`, `clef-flash`, or `tev1:4b` through its `Model` setting. Ollama checks the configured model's decision capability at startup. Install the selected model explicitly using `ollama pull <model>`. [Clef](https://ollama.com/library/clef), [Tev1](https://ollama.com/library/tev1)
+
+### Optional custom service overrides
+
+Existing hosts registering `ISttService` and `ISystemOneService` continue working without the new setup method. To override one built-in operation, register your implementation before or after `AddCameraSpeechMatchAI`:
+
+```csharp
+builder.Services.AddScoped<ISttService, YourSttService>();
+```
+
+An overridden operation does not activate, validate, or probe its unused built-in provider. The interfaces and component result contract remain compatible. Lexical mode never calls the semantic matcher.
 
 ## Service contracts
 
 ### Speech-to-text
 
-Implement [ISttService](src/CameraSpeechMatch/ISttService.cs):
+For an optional custom transcription service, implement [ISttService](src/CameraSpeechMatch/ISttService.cs):
 
 ```csharp
 Task<string> TranscribeAsync(
@@ -149,7 +243,7 @@ Set `IsAvailable` according to whether your service is configured. The component
 | --- | --- |
 | `PcmAudioContent` | Raw mono 16 kHz signed PCM16 little-endian bytes, captured automatically alongside the video. |
 
-The local Sample requires `PcmAudioContent`, wraps bounded windows in WAV headers in memory, sends audio through the ASR model's documented Ollama interface, and returns final transcript text. No audio-conversion executable is required.
+The built-in Ollama adapter requires `PcmAudioContent`, wraps bounded windows in WAV headers in memory, sends audio through the ASR model's documented Ollama interface, and returns final transcript text. No audio-conversion executable is required.
 
 The transcription request contains only automatically captured PCM audio. Your service selects the transcription language through its own configuration or provider language detection. The component's recording flow is independent of language. Recorded video and PCM audio are returned in `CameraSpeechMatchResult`.
 
@@ -157,7 +251,7 @@ Return the recognized text and honor cancellation. The component trims the retur
 
 ### Semantic matcher
 
-Implement [ISystemOneService](src/CameraSpeechMatch/ISystemOneService.cs) and register it with `IsAvailable == true`:
+For an optional custom matcher, implement [ISystemOneService](src/CameraSpeechMatch/ISystemOneService.cs) and register it with `IsAvailable == true`:
 
 ```csharp
 Task<double> MatchProbabilityAsync(
@@ -165,7 +259,7 @@ Task<double> MatchProbabilityAsync(
     CancellationToken cancellationToken);
 ```
 
-The [request](src/CameraSpeechMatch/MatchProbabilityRequest.cs) represents one System One `noul` decision: `State`, `Instructions`, and optional string properties `TrueCriteria` and `FalseCriteria`. State and instructions accept a nonblank string or a JSON-serializable object or array. A null criterion uses the model's default for that outcome. The adapter maps these typed properties to the standard `criteria.true` and `criteria.false` fields. See the [Ollama API reference](https://docs.ollama.com/api/systemone).
+The [request](src/CameraSpeechMatch/MatchProbabilityRequest.cs) describes one semantic decision (mapped to a System One `noul` question by Ollama, Jev, and Cloudflare): `State`, `Instructions`, and optional string properties `TrueCriteria` and `FalseCriteria`. State and instructions accept a nonblank string or a JSON-serializable object or array. A null criterion uses the model's default for that outcome. The adapter maps these typed properties to the standard `criteria.true` and `criteria.false` fields. See the [Ollama API reference](https://docs.ollama.com/api/systemone).
 
 ```csharp
 var request = new MatchProbabilityRequest
@@ -179,9 +273,9 @@ var request = new MatchProbabilityRequest
 
 The component builds the phrase data and comparison guidance before calling the service. Its instructions allow paraphrasing while preserving essential facts, names, identifiers, numbers, dates, and affirmation or negation, and require treating both phrases as data. It rejects empty transcriptions before calling the matcher. The Ollama adapter preserves state, instructions, and criterion descriptions, wrapping them in one `questions.match` entry with `type: "noul"` and mapping the typed criteria to their wire fields; model selection stays in configuration.
 
-Return a finite probability in `[0, 1]`. Invalid probabilities and handled provider errors fail processing. The component multiplies the probability by 100 to obtain `SemanticSimilarityPercent`. The semantic minimum passes when that percentage is greater than or equal to `MinimumSemanticSimilarityPercent`.
+Return a finite match estimate in `[0, 1]`. Chat-generated scores are distinct from System One probabilities; neither is calibrated verification accuracy, so evaluate thresholds for the chosen provider and phrases. Invalid probabilities and handled provider errors fail processing. The component multiplies the probability by 100 to obtain `SemanticSimilarityPercent`. The semantic minimum passes when that percentage is greater than or equal to `MinimumSemanticSimilarityPercent`.
 
-The local Sample posts structured phrase data and a typed `noul` question to Ollama's `/v1/systemone` endpoint. It validates the returned probability and rejects uncertain decisions before applying the component's acceptance threshold. See the [Sample README](src/CameraSpeechMatch.Sample/README.md) for the protocol and confidence settings.
+The built-in Ollama adapter posts structured phrase data and a typed `noul` question to Ollama's `/v1/systemone` endpoint. It validates the returned probability and rejects uncertain decisions before applying the component's acceptance threshold. See the [Sample README](src/CameraSpeechMatch.Sample/README.md) for the protocol and confidence settings.
 
 ## Matching behavior
 
@@ -191,7 +285,7 @@ For example, `Hello, WORLD!` and `hello world` score 100%; Persian `۱۲۳` and 
 
 `LexicalSimilarityPercent` measures Levenshtein similarity of normalized word sequences. When both strings contain one word, it compares Unicode characters instead. The score is rounded to two decimal places and is also reported in Semantic mode, independently of semantic acceptance.
 
-**Semantic mode** uses the host's probability service. It converts the probability to a 0–100 percentage and accepts scores at or above `MinimumSemanticSimilarityPercent`, which defaults to `80`. Each mode uses its own minimum.
+**Semantic mode** uses the configured semantic provider. It converts the probability to a 0–100 percentage and accepts scores at or above `MinimumSemanticSimilarityPercent`, which defaults to `80`. Each mode uses its own minimum.
 
 **Combined mode** first compares lexical similarity with `MinimumLexicalSimilarityPercent`. If it fails, processing finishes with `IsAccepted = false` and `SemanticSimilarityPercent = null`, without calling the semantic provider. If it passes, the component calculates semantic similarity and checks `MinimumSemanticSimilarityPercent`. Both scores must meet their respective minimums for acceptance.
 
@@ -277,7 +371,7 @@ dotnet build CameraSpeechMatch.slnx --configuration Release
 dotnet test CameraSpeechMatch.slnx --configuration Release
 ```
 
-.NET tests cover Ollama WAV audio construction/windowing, strict ASR/Jev parsing, limits/deadlines/cancellation, uncertain decisions, bounded startup, configuration/DI, and component acceptance/mismatch/failure behavior. Component checks cover inclusive minimums, Combined short-circuiting, result flags, rejected-recording playback, provider availability/errors, readiness, and sample mode controls.
+.NET tests cover WAV audio construction/windowing, native Ollama/Jev/Cloudflare decisions, Deepgram and ElevenLabs HTTP uploads, OpenAI SDK calls, language settings, limits/deadlines/cancellation, uncertain decisions, startup, configuration/DI, and component acceptance/mismatch/failure behavior. Component checks cover inclusive minimums, Combined short-circuiting, result flags, rejected-recording playback, provider availability/errors, readiness, and sample mode controls.
 
 Real model inference and Aspire process orchestration have separate opt-in tests; see the [Sample README](src/CameraSpeechMatch.Sample/README.md#tests).
 

@@ -1,11 +1,13 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
-using CameraSpeechMatchSample.Configuration;
+using CameraSpeechMatch.AI;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 
-namespace CameraSpeechMatchSample.Services.Ollama;
+namespace CameraSpeechMatch.AI.Ollama;
 
-public sealed class OllamaReadiness : IHealthCheck
+internal sealed class OllamaReadiness : IHealthCheck
 {
     private string? failure = "Waiting for local Ollama and the configured models.";
     public bool IsReady => Volatile.Read(ref failure) is null;
@@ -24,12 +26,12 @@ public sealed class OllamaReadiness : IHealthCheck
         var names = models.EnumerateArray().Select(model =>
             model.ValueKind == JsonValueKind.Object && model.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
                 ? name.GetString() : null).ToHashSet(StringComparer.Ordinal);
-        var missing = new[] { settings.SttModel, settings.MatchingModel }.Where(name => !names.Contains(name)).ToArray();
+        var missing = new[] { settings.SttModel, settings.MatchingModel }.Where(name => !string.IsNullOrWhiteSpace(name) && !names.Contains(name)).ToArray();
         if (missing.Length > 0)
             throw new InvalidOperationException("Missing Ollama models. Install explicitly: " +
                 string.Join("; ", missing.Select(name => $"ollama pull {name}")));
-        await CheckCapabilityAsync(settings.SttModel, "audio");
-        await CheckCapabilityAsync(settings.MatchingModel, "decision");
+        if (!string.IsNullOrWhiteSpace(settings.SttModel)) await CheckCapabilityAsync(settings.SttModel, "audio");
+        if (!string.IsNullOrWhiteSpace(settings.MatchingModel)) await CheckCapabilityAsync(settings.MatchingModel, "decision");
         SetStatus(null);
 
         async Task CheckCapabilityAsync(string model, string capability)
@@ -50,7 +52,7 @@ public sealed class OllamaReadiness : IHealthCheck
         Task.FromResult(IsReady ? HealthCheckResult.Healthy(Status) : HealthCheckResult.Unhealthy(Status));
 }
 
-public sealed class OllamaStartupService(
+internal sealed class OllamaStartupService(
     OllamaClient client, IOptions<OllamaSettings> options, OllamaReadiness readiness,
     ILogger<OllamaStartupService> logger) : BackgroundService
 {
@@ -66,7 +68,7 @@ public sealed class OllamaStartupService(
                 try
                 {
                     await readiness.CheckAsync(client, options.Value, deadline.Token);
-                    logger.LogInformation("Local Ollama is ready; both configured models advertise the required capabilities.");
+                    logger.LogInformation("Local Ollama is ready; the configured models advertise the required capabilities.");
                     return;
                 }
                 catch (Exception exception) when (exception is HttpRequestException or TimeoutException or InvalidDataException or InvalidOperationException)
@@ -79,7 +81,7 @@ public sealed class OllamaStartupService(
         }
         catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
         {
-            readiness.SetFailure($"Local AI readiness timed out. {lastError} Restart the Sample after fixing Ollama.");
+            readiness.SetFailure($"Local AI readiness timed out. {lastError} Restart the host after fixing Ollama.");
             logger.LogError("{ReadinessError}", readiness.Status);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }

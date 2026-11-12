@@ -1,7 +1,7 @@
 namespace CameraSpeechMatch;
 
 /// <summary>
-/// Recognizes speech in a recording. The host application implements this interface.
+/// Recognizes speech in a recording. Built-in providers implement this interface; hosts may supply an optional override.
 /// </summary>
 public interface ISttService
 {
@@ -10,7 +10,7 @@ public interface ISttService
 
     /// <summary>
     /// Transcribes the spoken audio in <paramref name="request"/>.
-    /// Implement this method in the host application with its speech-to-text provider and return the recognized text.
+    /// Returns the recognized text from the configured speech-to-text provider.
     /// The implementation selects the transcription language or uses its provider's language detection.
     /// </summary>
     /// <param name="request">Recorded PCM audio.</param>

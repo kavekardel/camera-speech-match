@@ -38,6 +38,8 @@ public sealed class AppHostTests
         // The child process must have consumed the reference to our ephemeral server, not localhost:11434.
         using var response = await http.GetAsync("/health", deadline.Token);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        string health = await response.Content.ReadAsStringAsync(deadline.Token);
+        Assert.Contains("camera-speech-match-ai", health);
         Assert.True(Volatile.Read(ref probes) > 0);
         Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/alive", deadline.Token)).StatusCode);
         string page = await http.GetStringAsync("/", deadline.Token);

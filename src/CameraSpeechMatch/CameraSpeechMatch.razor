@@ -242,7 +242,7 @@
             };
             string explanation = result.MatchMode switch
             {
-                CameraSpeechMatchMode.Semantic => "The result is based on the probability that the meaning and essential facts match the expected text.",
+                CameraSpeechMatchMode.Semantic => "The result is based on the semantic score for matching meaning and essential facts.",
                 CameraSpeechMatchMode.Combined => "Both lexical and semantic similarity must meet their required minimums.",
                 _ => "The result is based on normalized wording similarity and the required minimum."
             };

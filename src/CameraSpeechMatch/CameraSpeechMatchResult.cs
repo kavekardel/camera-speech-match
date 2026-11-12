@@ -22,7 +22,7 @@ public sealed class CameraSpeechMatchResult
     /// <summary>The minimum lexical similarity captured for a Lexical or Combined attempt; null in Semantic mode.</summary>
     public double? MinimumLexicalSimilarityPercent { get; set; }
 
-    /// <summary>Semantic similarity from 0 to 100; null when not evaluated, including a Combined lexical mismatch.</summary>
+    /// <summary>Semantic score from 0 to 100; null when not evaluated, including a Combined lexical mismatch. Scores require provider-specific threshold evaluation and are not calibrated verification accuracy.</summary>
     public double? SemanticSimilarityPercent { get; set; }
 
     /// <summary>The minimum semantic similarity captured for a Semantic or Combined attempt; null in Lexical mode.</summary>

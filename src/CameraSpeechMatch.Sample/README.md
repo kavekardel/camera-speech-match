@@ -1,6 +1,6 @@
 # Local Sample with Aspire
 
-The Sample runs speech transcription and semantic matching on the host's existing Ollama server. It needs no paid AI account, API key, Docker, or additional gateway. The reusable Blazor component uses `TranscribeRequest` and `MatchProbabilityRequest` for its service contracts.
+By default, the Sample runs built-in library transcription and semantic matching on the host's existing Ollama server. The default local setup needs no paid AI account, API key, Docker, or gateway. Cloud and mixed setups use the same library registration. The reusable Blazor component uses `TranscribeRequest` and `MatchProbabilityRequest` for its service contracts.
 
 ## Prerequisites
 
@@ -48,30 +48,68 @@ Press Ctrl+C in the AppHost terminal to stop its managed Sample process and dash
 
 ## Configuration and readiness
 
-The AppHost models Ollama as an external host service and launches only the Blazor Server Sample. `.WithReference(ollama)` supplies the `services:ollama:http:0` endpoint (or HTTPS equivalent). The Sample resolves that reference before its own `Ollama:BaseUrl`. Configure the AppHost's [appsettings.json](../CameraSpeechMatch.AppHost/appsettings.json), or set `Ollama__BaseUrl`, to change the server address. Direct Sample execution uses its [appsettings.json](appsettings.json). No secrets are needed.
+AI implementations now live in the component library. The Sample calls `AddCameraSpeechMatchAI` and binds `CameraSpeechMatch:AI`; it contains no AI service implementations. See the [provider configuration examples](../../README.md#built-in-provider-configuration) for local, cloud, and mixed setups.
 
-Both managed processes run directly on the host, so `http://localhost:11434` reaches the existing local Ollama and model store. Docker is unnecessary. If you later containerize the Sample, configure a reachable host endpoint such as `http://host.docker.internal:11434` on Docker Desktop; `localhost` in that container refers to the container. A loopback-only Ollama listener will also need an intentionally configured private route. The supplied setup keeps Ollama on host loopback and does not change its binding or expose it publicly.
+The two operation sections are independent:
 
-The Sample starts its web server immediately, but withholds the recorder until readiness succeeds. A background probe checks `/api/version`, exact model names in `/api/tags`, and `/api/show` capabilities (`audio` and `decision`). Each request has a deadline; retries stop after the overall startup budget. The UI updates automatically when readiness changes. `/alive` returns process liveness; `/health` returns startup readiness with diagnostic JSON and HTTP 503 until ready. Aspire monitors `/health` and separately checks the external Ollama `/api/version` endpoint. Models load on first inference; availability checks do not load or download them. Inference errors after startup fail the attempt; restart after repairing the dependency.
+```json
+{
+  "CameraSpeechMatch": {
+    "AI": {
+      "Transcription": {
+        "Provider": "Ollama",
+        "Endpoint": "http://localhost:11434",
+        "Model": "frozenlab/qwen3-asr:0.6b"
+      },
+      "SemanticMatching": {
+        "Provider": "OllamaSystemOne",
+        "Endpoint": "http://localhost:11434",
+        "Model": "nimble:9b-q4_K_M",
+        "MinimumDecisionProbability": 0.8
+      }
+    }
+  }
+}
+```
 
-All settings below are under `Ollama` in the Sample. Environment variables use double underscores, for example `Ollama__MatchingTimeoutSeconds=180`.
+Aspire supplies `services:ollama:http:0` (or HTTPS equivalent). The Sample's registration action applies that address only to operations selecting Ollama. Direct execution uses the operation's configured endpoint. AppHost still configures its external resource through `Ollama:BaseUrl`; the Sample uses `CameraSpeechMatch:AI:Transcription:Endpoint` and `CameraSpeechMatch:AI:SemanticMatching:Endpoint`.
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `BaseUrl` | `http://localhost:11434` | Host Ollama address; overridden by Aspire's service reference. |
-| `SttModel` | `frozenlab/qwen3-asr:0.6b` | Exact ASR model. |
-| `MatchingModel` | `nimble:9b-q4_K_M` | Exact decision model. |
-| `StartupTimeoutSeconds` | `60` | Overall bounded readiness budget. |
-| `ProbeTimeoutSeconds` | `5` | Individual readiness HTTP deadline. |
-| `RetryDelaySeconds` | `2` | Delay between startup attempts. |
-| `TranscriptionTimeoutSeconds` | `120` | Total transcription deadline across all audio windows. |
-| `MatchingTimeoutSeconds` | `120` | Decision deadline, including body reading and cold loading. |
-| `MaximumAudioBytes` | `10485760` | Raw PCM limit, no more than the component's 10 MiB limit. |
-| `MaximumResponseBytes` | `262144` | Bounded JSON response size. |
-| `MaximumMatchingRequestBytes` | `65536` | Decision request size, capped at the endpoint's 64 KiB limit. |
-| `MinimumDecisionProbability` | `0.8` | Reject decisions between 0.2 and 0.8 as uncertain. The component separately applies its selected acceptance minimum. |
+For cloud use, set either operation's provider to `OpenAICompatible`, choose its model, set the API base URL including `/v1`, and supply its key via user secrets or environment variables. For example:
 
-Model names and endpoint are configurable in one section. The Sample contains only local Ollama adapters. They use the documented ASR and Jev protocols; a different model must support the same protocol or have a corresponding adapter.
+```powershell
+$env:CameraSpeechMatch__AI__SemanticMatching__Provider = 'OpenAICompatible'
+$env:CameraSpeechMatch__AI__SemanticMatching__Endpoint = 'https://your-provider.example/v1'
+$env:CameraSpeechMatch__AI__SemanticMatching__Model = 'your-structured-output-model'
+# Supply CameraSpeechMatch__AI__SemanticMatching__ApiKey through your secret store.
+dotnet run --project src/CameraSpeechMatch.Sample
+```
+
+This keeps local Ollama transcription with cloud semantic matching. Configure both operations as OpenAI-compatible for an entirely cloud setup; transcription requires the audio transcription API and matching requires strict JSON Schema Chat Completions. There is no Azure-specific credential/deployment adapter in v1. Official OpenAI requires a key; explicitly configured unauthenticated self-hosted endpoints can omit it. Credentials stay on the server.
+
+For an entirely cloud setup, run the Sample directly; the default AppHost still declares and monitors an external Ollama resource.
+
+The recorder waits only for the providers required by its selected mode. The provider-neutral `CameraSpeechMatchAiReadiness` updates the UI. `/alive` reports process liveness; `/health` reports the `camera-speech-match-ai` check, returning 503 until transcription and all configured matching providers are ready. Local startup checks only each operation's selected model and capability; cloud startup validates configuration without inference. Probes never pull or load models. Restart after repairing a dependency if its startup deadline expired.
+
+Defaults per operation: `TimeoutSeconds=120`, `MaximumResponseBytes=262144`, `StartupTimeoutSeconds=60`, `ProbeTimeoutSeconds=5`, and `RetryDelaySeconds=2`. Transcription adds `MaximumAudioBytes=10485760`; matching adds `MaximumMatchingRequestBytes=65536` and native System One providers' `MinimumDecisionProbability=0.8`. Environment variables follow the operation path, for example `CameraSpeechMatch__AI__Transcription__TimeoutSeconds=180`. Both providers default to `None` in the library; the Sample explicitly selects Ollama.
+
+### Hosted providers
+
+The library also supplies `Jev` and `CloudflareClef` semantic matching, plus `Deepgram` and `ElevenLabs` transcription. The [hosted provider examples](../../README.md#jev-cloudflare-clef-deepgram-and-elevenlabs) cover both Jev/ElevenLabs and Jev/Deepgram setups.
+
+For example, use this `CameraSpeechMatch:AI` configuration for Jev with automatic-language ElevenLabs transcription:
+
+```json
+{
+  "Transcription": { "Provider": "ElevenLabs", "Model": "scribe_v2" },
+  "SemanticMatching": { "Provider": "Jev", "Model": "jev-1.14.0" }
+}
+```
+
+Supply separate keys at `CameraSpeechMatch:AI:Transcription:ApiKey` and `CameraSpeechMatch:AI:SemanticMatching:ApiKey` using your secret store. For Persian Deepgram transcription, select `Provider=Deepgram`, `Model=nova-3`, and `Language=fa`. English uses `Language=en`. Omit `Language` for ElevenLabs automatic detection.
+
+Cloudflare uses `Provider=CloudflareClef`, `Model=clef` or `clef-flash`, the Workers AI token in `ApiKey`, and your `AccountId`. Both hosted matchers use typed Noul probabilities and the configured `MinimumDecisionProbability`. Cloudflare also applies a conservative 16 KiB request ceiling. The [Cloudflare REST setup](https://developers.cloudflare.com/workers-ai/get-started/rest-api/) describes account IDs and token permissions.
+
+Run the Sample directly for hosted setups. The supplied AppHost declares the local Ollama resource.
 
 ## Model protocols and audio
 
@@ -124,3 +162,43 @@ dotnet test tests/CameraSpeechMatch.Tests --filter Category=OllamaIntegration
 ```
 
 Supply a RIFF WAV containing mono 16 kHz PCM16 audio; only the test fixture reader consumes WAV files. The production adapter receives raw PCM from the component. On macOS/Linux set the same variables using `export`. The connectivity/model and semantic tests need only `OLLAMA_INTEGRATION=1`; the audio test additionally needs both fixture variables. Webcam permissions, real face detection, and recognition quality in your environment require a browser/device check.
+
+### Opt-in cloud inference
+
+Normal tests use local HTTP doubles with the real SDK and do not need keys or models. To exercise a real OpenAI-compatible service, explicitly opt in and configure a mono 16 kHz PCM16 RIFF WAV fixture:
+
+```powershell
+$env:CSM_CLOUD_INTEGRATION = '1'
+$env:CSM_TEST_AI_ENDPOINT = 'https://your-provider.example/v1'
+$env:CSM_TEST_STT_MODEL = 'your-transcription-model'
+$env:CSM_TEST_MATCHING_MODEL = 'your-structured-output-model'
+$env:CSM_TEST_WAV = 'C:\recordings\verification.wav'
+$env:CSM_TEST_EXPECTED = 'The exact words spoken in the recording.'
+# Supply CSM_TEST_AI_KEY through your secret store if the endpoint requires authentication.
+dotnet test tests/CameraSpeechMatch.Tests --filter Category=CloudIntegration
+```
+
+This test performs real transcription and matching calls and may incur provider charges. Chat scores are model-generated estimates, distinct from System One probabilities; evaluate thresholds on your own phrases and selected model.
+
+### Opt-in hosted provider validation
+
+The `HostedIntegration` tests exercise Jev, Cloudflare Clef, Deepgram, and ElevenLabs. Enable them explicitly:
+
+```powershell
+$env:CSM_HOSTED_INTEGRATION = '1'
+# Set the keys for the providers you want to test through your secret store:
+# CSM_JEV_API_KEY, CSM_CLOUDFLARE_API_KEY, CSM_DEEPGRAM_API_KEY, CSM_ELEVENLABS_API_KEY
+# Cloudflare additionally requires CSM_CLOUDFLARE_ACCOUNT_ID.
+
+$env:CSM_TEST_WAV_EN = 'C:\recordings\english.wav'
+$env:CSM_TEST_EXPECTED_EN = 'The exact English words spoken in the recording.'
+$env:CSM_TEST_WAV_FA = 'C:\recordings\persian.wav'
+# Set CSM_TEST_EXPECTED_FA to the exact Persian words in persian.wav.
+dotnet test tests/CameraSpeechMatch.Tests --filter Category=HostedIntegration
+```
+
+Use RIFF WAV files containing mono 16 kHz PCM16 audio. STT tests require the key and the language-specific fixture/expected-text pair. Matching tests require the key and, for Cloudflare, account ID. Each provider's tests skip when its required setup is absent.
+
+Model defaults in these opt-in fixtures are `jev-1.14.0`, `clef-flash`, `nova-3`, and `scribe_v2`. Override them with `CSM_JEV_MODEL`, `CSM_CLOUDFLARE_MODEL`, `CSM_DEEPGRAM_MODEL`, or `CSM_ELEVENLABS_MODEL`. Corresponding `_ENDPOINT` variables can override endpoint bases. Production configuration requires an explicit model.
+
+The matching cases cover English and Persian paraphrases, changed amounts, and negation. Recognition checks compare the expected and transcribed wording after the component's normalization. These tests make real provider calls and may incur charges. Local HTTP-double tests verify the protocols and failure handling independently of model quality.

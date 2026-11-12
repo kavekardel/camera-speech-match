@@ -326,14 +326,30 @@ public sealed class ComponentPcmTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Sample_LexicalModeDoesNotWaitForSemanticProvider()
+    {
+        var readiness = new CameraSpeechMatchAiReadiness();
+        readiness.Set(true, new(true, true, "Speech is ready."));
+        Services.AddSingleton(readiness);
+        Render<MudPopoverProvider>();
+        var page = Render<global::CameraSpeechMatchSample.Components.Pages.Home>();
+        Assert.Single(page.FindComponents<Component>());
+        var selector = page.FindComponent<MudSelect<CameraSpeechMatchMode>>();
+        await page.InvokeAsync(() => selector.Instance.ValueChanged.InvokeAsync(CameraSpeechMatchMode.Semantic));
+        Assert.Empty(page.FindComponents<Component>());
+        await page.InvokeAsync(() => readiness.Set(false, new(true, true, "Matching is ready.")));
+        page.WaitForAssertion(() => Assert.Single(page.FindComponents<Component>()));
+    }
+
+    [Fact]
     public async Task Sample_WithholdsRecorderUntilLocalModelsAreReady()
     {
-        var ready = new global::CameraSpeechMatchSample.Services.Ollama.OllamaReadiness();
+        var ready = new CameraSpeechMatchAiReadiness();
         Services.AddSingleton(ready);
         Render<MudPopoverProvider>();
         var page = Render<global::CameraSpeechMatchSample.Components.Pages.Home>();
         Assert.Empty(page.FindComponents<Component>());
-        Assert.Contains("Waiting for local Ollama", page.Markup);
+        Assert.Contains("Speech recognition is not configured", page.Markup);
         await page.InvokeAsync(() => OllamaServiceTests.MakeReadyAsync(ready));
         page.WaitForAssertion(() => Assert.Single(page.FindComponents<Component>()));
     }

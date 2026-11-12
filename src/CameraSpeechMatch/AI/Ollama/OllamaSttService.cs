@@ -1,13 +1,12 @@
-using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
 using CameraSpeechMatch;
-using CameraSpeechMatchSample.Configuration;
+using CameraSpeechMatch.AI;
 using Microsoft.Extensions.Options;
 
-namespace CameraSpeechMatchSample.Services.Ollama;
+namespace CameraSpeechMatch.AI.Ollama;
 
-public sealed class OllamaSttService(
+internal sealed class OllamaSttService(
     OllamaClient client, IOptions<OllamaSettings> options, OllamaReadiness readiness) : ISttService
 {
     private const int BytesPerSecond = 16_000 * 2;
@@ -19,13 +18,7 @@ public sealed class OllamaSttService(
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
-        byte[] audio = request.PcmAudioContent ?? throw new ArgumentException("Mono 16 kHz PCM16 audio is required.", nameof(request));
-        if (audio.Length == 0 || audio.Length % 2 != 0 || audio.Length > options.Value.MaximumAudioBytes)
-            throw new ArgumentException("Audio must contain complete PCM16 samples within the configured byte limit.", nameof(request));
-        // Containers are not raw PCM. The public request contract supplies the format, not file metadata.
-        if (audio.AsSpan().StartsWith("RIFF"u8) || audio.AsSpan().StartsWith("OggS"u8) ||
-            audio.AsSpan().StartsWith("ID3"u8) || audio.AsSpan().StartsWith(new byte[] { 0x1a, 0x45, 0xdf, 0xa3 }))
-            throw new ArgumentException("Supply raw mono 16 kHz PCM16, not WAV, Ogg, MP3, or WebM.", nameof(request));
+        byte[] audio = PcmAudio.Validate(request, options.Value.MaximumAudioBytes);
         if (!IsAvailable) throw new InvalidOperationException(readiness.Status);
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -36,21 +29,7 @@ public sealed class OllamaSttService(
             for (int offset = 0; offset < audio.Length; offset += ChunkBytes)
             {
                 var pcm = audio.AsSpan(offset, Math.Min(ChunkBytes, audio.Length - offset));
-                // One bounded PCM copy adds a WAV header. JsonContent writes byte[] as base64 directly.
-                byte[] wav = new byte[44 + pcm.Length];
-                "RIFF"u8.CopyTo(wav);
-                BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(4), wav.Length - 8);
-                "WAVEfmt "u8.CopyTo(wav.AsSpan(8));
-                BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(16), 16);
-                BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(20), 1);
-                BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(22), 1);
-                BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(24), 16_000);
-                BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(28), BytesPerSecond);
-                BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(32), 2);
-                BinaryPrimitives.WriteInt16LittleEndian(wav.AsSpan(34), 16);
-                "data"u8.CopyTo(wav.AsSpan(36));
-                BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(40), pcm.Length);
-                pcm.CopyTo(wav.AsSpan(44));
+                byte[] wav = PcmAudio.ToWave(pcm);
                 using var response = await client.SendAsync(HttpMethod.Post, "api/chat", new
                 {
                     model = options.Value.SttModel,

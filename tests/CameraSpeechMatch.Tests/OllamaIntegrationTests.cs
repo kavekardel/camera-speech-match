@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using CameraSpeechMatch;
-using CameraSpeechMatchSample.Configuration;
-using CameraSpeechMatchSample.Services.Ollama;
+using CameraSpeechMatch.AI.Ollama;
 using Microsoft.Extensions.Options;
 
 namespace CameraSpeechMatch.Tests;
@@ -81,7 +80,7 @@ public sealed class OllamaIntegrationTests
         FalseCriteria = "Different meaning, missing or changed facts, or insufficient evidence."
     };
 
-    private static byte[] ReadPcmWave(string path)
+    internal static byte[] ReadPcmWave(string path)
     {
         byte[] wav = File.ReadAllBytes(path);
         Assert.True(wav.Length >= 44 && wav.AsSpan(0, 4).SequenceEqual("RIFF"u8) && wav.AsSpan(8, 4).SequenceEqual("WAVE"u8));

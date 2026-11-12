@@ -1,4 +1,4 @@
-using CameraSpeechMatchSample.Services.Ollama;
+using CameraSpeechMatch;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using MudBlazor.Services;
 using CameraSpeechMatchSample.Components;
@@ -8,7 +8,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
-builder.Services.AddLocalOllama(builder.Configuration);
+builder.Services.AddCameraSpeechMatchAI(options =>
+{
+    builder.Configuration.GetSection(CameraSpeechMatchAiOptions.SectionName).Bind(options);
+    // Aspire discovery is host configuration; the library does not assume a service name.
+    var endpoint = builder.Configuration["services:ollama:http:0"] ?? builder.Configuration["services:ollama:https:0"];
+    if (endpoint is null) return;
+    if (options.Transcription.Provider == TranscriptionProvider.Ollama) options.Transcription.Endpoint = endpoint;
+    if (options.SemanticMatching.Provider == SemanticMatchingProvider.OllamaSystemOne) options.SemanticMatching.Endpoint = endpoint;
+});
 
 var app = builder.Build();
 
